@@ -168,3 +168,37 @@ por `nombre` (UNIQUE) en vez de slug.
   `output_dimension=512`** — misma dimensión que el spec (`vector(512)`),
   mejor calidad, y `voyage-3.5-lite` @ 512 queda como fallback por env
   var si hiciera falta.
+
+## Cambio de proveedor: NVIDIA NIM (2026-07-13, durante la ejecución)
+
+**Contexto:** al arrancar la ejecución el usuario no tenía API key de
+Anthropic ni de Voyage (Claude Pro es la suscripción del chat, no da
+acceso a la API). Propuso usar las keys gratuitas de
+[NVIDIA Build](https://build.nvidia.com) (NIM, API OpenAI-compatible en
+`https://integrate.api.nvidia.com/v1`).
+
+**Decisión:** proveedor primario = NVIDIA NIM. La capa de providers se
+diseñó exactamente para esto (punto 5): se agregó
+`OpenAICompatChatProvider`/`OpenAICompatEmbeddingProvider` y el factory
+elige por env `PROVIDER` (default `nvidia`). El código de
+Anthropic/Voyage queda en el repo como alternativa (`PROVIDER=anthropic`)
+para cuando haya keys.
+
+**Modelos elegidos (overrideables por env):**
+- Potente: `meta/llama-3.3-70b-instruct` — español sólido, buen
+  instruction-following para "no inventar datos", rápido en NIM.
+- Económico: `meta/llama-3.1-8b-instruct` — filtros/aclaración con
+  diseño fail-open que tolera sus errores.
+- Embeddings: `baai/bge-m3` — el multilingüe de mejor reputación del
+  catálogo NIM para retrieval en español. **1024 dims** → el esquema
+  pasó de `vector(512)` a `vector(1024)` (DB recreada, aún sin datos).
+
+**Detalles técnicos:** JSON estructurado vía `nvext.guided_json` (vLLM)
+con fallback a prompt+parseo tolerante; `complete_json` es fail-open.
+Sin parámetros de sampling (defaults del servidor). Free tier ~40
+req/min: embeddings en lotes de 32 con reintentos.
+
+**Para reevaluar en el MVP:** si aparecen keys de Anthropic, comparar
+calidad de síntesis (`PROVIDER=anthropic`) — la síntesis es el paso con
+la barra de calidad más alta del spec; y considerar modelos NIM más
+nuevos (deepseek-v4, qwen3.5, nemotron) para el rol potente.

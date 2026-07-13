@@ -4,19 +4,20 @@
 
 **Goal:** Backend RAG funcionando end-to-end: carga del dataset tramites-bo a Postgres+pgvector, retrieval híbrido con gate de confianza, loop de aclaración y respuesta sintetizada en streaming SSE vía `POST /chat`.
 
-**Architecture:** Script de ingesta única (jsonl → mapeo puro → fallback de costo con LLM → embeddings Voyage → upsert Postgres). Pipeline online: Haiku infiere filtros (structured output), búsqueda vectorial + filtros en pgvector, gate de confianza determinista, aclaración con Haiku o síntesis streaming con Sonnet. Providers detrás de protocolos mínimos para poder enchufar open-source después.
+**Architecture:** Script de ingesta única (jsonl → mapeo puro → fallback de costo con LLM → embeddings → upsert Postgres). Pipeline online: el modelo económico infiere filtros (JSON), búsqueda vectorial + filtros en pgvector, gate de confianza determinista, aclaración con el modelo económico o síntesis streaming con el modelo potente. Providers detrás de protocolos mínimos — proveedor primario NVIDIA NIM (gratis), Anthropic/Voyage como alternativa por env var.
 
-**Tech Stack:** Python 3.11+, FastAPI + uvicorn, psycopg 3, Postgres 16 + pgvector (Docker), SDK `anthropic` (Claude Sonnet 5 + Haiku 4.5), SDK `voyageai` (voyage-4-lite @ 512 dims), pytest.
+**Tech Stack:** Python 3.11+, FastAPI + uvicorn, psycopg 3, Postgres 16 + pgvector (Docker), SDK `openai` contra NVIDIA NIM (`integrate.api.nvidia.com/v1`: llama-3.3-70b + llama-3.1-8b + bge-m3 @ 1024 dims), SDKs `anthropic`/`voyageai` como providers alternativos, pytest.
 
 ## Global Constraints
 
-- Modelos exactos: potente=`claude-sonnet-5`, económico=`claude-haiku-4-5`, embeddings=`voyage-4-lite` con `output_dimension=512`. Overrideables por env vars `MODELO_POTENTE`, `MODELO_ECONOMICO`, `MODELO_EMBEDDINGS`, `EMBEDDING_DIM`.
-- **Nunca** pasar `temperature`/`top_p`/`top_k` a la API de Anthropic (Sonnet 5 rechaza valores no default con 400).
-- Structured output vía `output_config={"format": {"type": "json_schema", "schema": ...}}` — no tool_choice forzado, no `output_format` top-level (deprecado). Todo schema de objeto lleva `additionalProperties: false` y `required` con todas las propiedades.
+- **Proveedor primario: NVIDIA NIM** (keys gratis en build.nvidia.com). Env: `PROVIDER=nvidia` (default), `NVIDIA_API_KEY` (formato `nvapi-...`), `NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1`. Modelos: potente=`meta/llama-3.3-70b-instruct`, económico=`meta/llama-3.1-8b-instruct`, embeddings=`baai/bge-m3` (**1024 dims** → columna `vector(1024)`). Overrideables por `MODELO_POTENTE`, `MODELO_ECONOMICO`, `MODELO_EMBEDDINGS`, `EMBEDDING_DIM`.
+- **Proveedor alternativo: Anthropic + Voyage** con `PROVIDER=anthropic` (defaults: `claude-sonnet-5`, `claude-haiku-4-5`, `voyage-4-lite`). Su código vive en el repo aunque el demo corra con NVIDIA. Regla Anthropic: nunca pasar `temperature`/`top_p`/`top_k` (Sonnet 5 rechaza valores no default con 400); structured output vía `output_config={"format": {"type": "json_schema", "schema": ...}}`.
+- No setear parámetros de sampling en ningún proveedor (defaults del servidor).
+- JSON estructurado en NVIDIA NIM: intentar `extra_body={"nvext": {"guided_json": schema}}` y, si el modelo no lo soporta, caer a instrucción "respondé solo JSON" + parseo tolerante. `complete_json` es fail-open: NUNCA lanza excepción, devuelve `None` ante cualquier fallo. Todo schema de objeto lleva `additionalProperties: false` y `required` con todas las propiedades.
 - Texto visible al usuario final: siempre en español. Identificadores de dominio en español (`mapear_tramite`, `buscar_tramites`); infra genérica en inglés (`get_connection`, `ConversationStore`).
 - DB: `postgresql://ami:ami@localhost:5433/ami` (puerto 5433 para no chocar con un Postgres local). Embeddings se pasan a SQL como literal string `'[0.1,0.2,...]'::vector` — sin adapter de pgvector en Python.
 - Dataset real verificado (2026-07-13): 1,739 registros, todos `estado=PUBLICADO`; `id` viene como string (castear a int); `eventosVida` es lista de **strings**; `palabrasClave` puede ser null; `costos[].costo` siempre parseable a float; fechas `DD/MM/YYYY`.
-- Dependencias: solo las de `requirements.txt` del Task 1. No agregar librerías nuevas.
+- Dependencias: solo las de `requirements.txt` del Task 1 más `openai>=1.40` (agregado en Task 2). No agregar otras librerías.
 - Git: el repo ya está inicializado (rama `master`). El usuario prefirió no tocar git durante el diseño — **al arrancar la ejecución, confirmar si quiere los commits por task o trabajar sin commits**; si acepta, usar los pasos de commit tal cual.
 
 ---
@@ -192,29 +193,68 @@ git commit -m "feat: scaffolding con Postgres+pgvector y schema inicial"
 
 ---
 
-### Task 2: Capa de providers (Anthropic + Voyage)
+### Task 2: Capa de providers (NVIDIA NIM primario; Anthropic/Voyage alternativos)
 
 **Files:**
+- Modify: `requirements.txt` (+ `openai>=1.40`)
+- Modify: `.env.example` (proveedor NVIDIA + dims 1024)
+- Modify: `db/schema.sql` (`vector(512)` → `vector(1024)`)
 - Create: `providers/base.py`
+- Create: `providers/openai_compat.py`
 - Create: `providers/anthropic_chat.py`
 - Create: `providers/voyage_embeddings.py`
 - Create: `providers/factory.py`
 - Test: `tests/test_providers.py`
 
 **Interfaces:**
-- Consumes: env vars del Task 1.
+- Consumes: env vars del Task 1 (enmendadas acá).
 - Produces (contratos que usan Tasks 5, 7, 8, 9):
   - `providers.base.ChatProvider` (Protocol): `complete(*, system: str, messages: list[dict], max_tokens: int = 1024) -> str`; `complete_json(*, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None`; `stream(*, system: str, messages: list[dict], max_tokens: int = 4096) -> Iterator[str]`. `messages` son dicts `{"role": "user"|"assistant", "content": str}`.
   - `providers.base.EmbeddingProvider` (Protocol): `embed_documents(texts: list[str]) -> list[list[float]]`; `embed_query(text: str) -> list[float]`.
-  - `providers.factory.chat_potente() / chat_economico() -> AnthropicChatProvider`; `providers.factory.embedder() -> VoyageEmbeddingProvider`.
+  - `providers.factory.chat_potente() / chat_economico() -> ChatProvider`; `providers.factory.embedder() -> EmbeddingProvider` — instancian NVIDIA u Anthropic/Voyage según `PROVIDER`.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [ ] **Step 1: Enmienda de infraestructura (proveedor NVIDIA + 1024 dims)**
+
+```bash
+printf 'openai>=1.40\n' >> requirements.txt
+.venv/bin/pip install -r requirements.txt
+sed -i 's/vector(512)/vector(1024)/' db/schema.sql
+docker compose down -v && docker compose up -d && sleep 5
+docker compose exec db psql -U ami -d ami -c "\dt"
+```
+
+Reescribir `.env.example` con este contenido exacto:
+
+```
+# Proveedor de modelos: nvidia (default, keys gratis en build.nvidia.com) | anthropic
+PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+DATABASE_URL=postgresql://ami:ami@localhost:5433/ami
+MODELO_POTENTE=meta/llama-3.3-70b-instruct
+MODELO_ECONOMICO=meta/llama-3.1-8b-instruct
+MODELO_EMBEDDINGS=baai/bge-m3
+EMBEDDING_DIM=1024
+# Solo si PROVIDER=anthropic (usar: claude-sonnet-5 / claude-haiku-4-5 / voyage-4-lite y EMBEDDING_DIM acorde):
+ANTHROPIC_API_KEY=
+VOYAGE_API_KEY=
+```
+
+Actualizar también el `.env` local al mismo formato, **preservando cualquier key real que el usuario ya haya puesto**.
+
+Expected: `openai` instalado; `\dt` lista de nuevo las 6 tablas (volumen recreado desde cero); `grep vector db/schema.sql` muestra `vector(1024)`.
+
+- [ ] **Step 2: Escribir los tests que fallan**
 
 ```python
 # tests/test_providers.py
 import json
+from types import SimpleNamespace
 
 from providers.anthropic_chat import AnthropicChatProvider
+from providers.openai_compat import OpenAICompatChatProvider, OpenAICompatEmbeddingProvider
+
+# ---------- fakes del SDK de Anthropic ----------
 
 
 class FakeBlock:
@@ -243,7 +283,7 @@ class FakeClient:
         self.messages = FakeMessages(response)
 
 
-def test_complete_concatena_bloques_de_texto():
+def test_anthropic_complete_concatena_bloques_de_texto():
     client = FakeClient(FakeResponse([FakeBlock("thinking"), FakeBlock("text", "Hola "), FakeBlock("text", "mundo")]))
     provider = AnthropicChatProvider(model="claude-haiku-4-5", client=client)
     resultado = provider.complete(system="sos un test", messages=[{"role": "user", "content": "hola"}])
@@ -252,7 +292,7 @@ def test_complete_concatena_bloques_de_texto():
     assert "temperature" not in client.messages.last_kwargs
 
 
-def test_complete_json_parsea_y_pasa_schema():
+def test_anthropic_complete_json_parsea_y_pasa_schema():
     schema = {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"], "additionalProperties": False}
     client = FakeClient(FakeResponse([FakeBlock("text", '{"a": 1}')]))
     provider = AnthropicChatProvider(model="claude-haiku-4-5", client=client)
@@ -261,18 +301,97 @@ def test_complete_json_parsea_y_pasa_schema():
     assert client.messages.last_kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
 
 
-def test_complete_json_devuelve_none_con_json_invalido():
+def test_anthropic_complete_json_devuelve_none_con_json_invalido():
     client = FakeClient(FakeResponse([FakeBlock("text", "esto no es json")]))
     provider = AnthropicChatProvider(model="claude-haiku-4-5", client=client)
     assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
+
+
+# ---------- fakes de cliente OpenAI-compatible (NVIDIA NIM) ----------
+
+
+class FakeCompletions:
+    def __init__(self, respuestas):
+        self._respuestas = list(respuestas)
+        self.llamadas = []
+
+    def create(self, **kwargs):
+        self.llamadas.append(kwargs)
+        resultado = self._respuestas.pop(0)
+        if isinstance(resultado, Exception):
+            raise resultado
+        return resultado
+
+
+def _resp_chat(texto):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=texto))])
+
+
+def _resp_embed(*vectores):
+    return SimpleNamespace(data=[SimpleNamespace(embedding=list(v)) for v in vectores])
+
+
+def _fake_openai(chat=(), embed=()):
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions(chat)),
+        embeddings=FakeCompletions(embed),
+    )
+
+
+def test_openai_complete_prepende_system():
+    cliente = _fake_openai(chat=[_resp_chat("hola!")])
+    provider = OpenAICompatChatProvider(model="meta/llama-3.1-8b-instruct", base_url="http://x", api_key="k", client=cliente)
+    assert provider.complete(system="sos un test", messages=[{"role": "user", "content": "hola"}]) == "hola!"
+    llamada = cliente.chat.completions.llamadas[0]
+    assert llamada["messages"][0] == {"role": "system", "content": "sos un test"}
+    assert llamada["model"] == "meta/llama-3.1-8b-instruct"
+    assert "temperature" not in llamada
+
+
+def test_openai_complete_json_usa_guided_json():
+    cliente = _fake_openai(chat=[_resp_chat('{"a": 1}')])
+    provider = OpenAICompatChatProvider(model="m", base_url="http://x", api_key="k", client=cliente)
+    datos = provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={"type": "object"})
+    assert datos == {"a": 1}
+    assert cliente.chat.completions.llamadas[0]["extra_body"] == {"nvext": {"guided_json": {"type": "object"}}}
+
+
+def test_openai_complete_json_fallback_sin_guided():
+    cliente = _fake_openai(chat=[RuntimeError("guided no soportado"), _resp_chat('bla {"a": 2} bla')])
+    provider = OpenAICompatChatProvider(model="m", base_url="http://x", api_key="k", client=cliente)
+    datos = provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={"type": "object"})
+    assert datos == {"a": 2}
+    assert "extra_body" not in cliente.chat.completions.llamadas[1]
+
+
+def test_openai_complete_json_nunca_lanza():
+    cliente = _fake_openai(chat=[RuntimeError("boom"), RuntimeError("boom")])
+    provider = OpenAICompatChatProvider(model="m", base_url="http://x", api_key="k", client=cliente)
+    assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
+
+
+def test_openai_embeddings_input_type_y_lotes():
+    cliente = _fake_openai(embed=[_resp_embed([0.1, 0.2]), _resp_embed([0.3, 0.4])])
+    provider = OpenAICompatEmbeddingProvider(model="baai/bge-m3", base_url="http://x", api_key="k", client=cliente)
+    provider._TAMANO_LOTE = 1  # fuerza dos lotes
+    vectores = provider.embed_documents(["a", "b"])
+    assert vectores == [[0.1, 0.2], [0.3, 0.4]]
+    assert [l["extra_body"]["input_type"] for l in cliente.embeddings.llamadas] == ["passage", "passage"]
+
+
+def test_openai_embed_query_usa_input_type_query():
+    cliente = _fake_openai(embed=[_resp_embed([0.5, 0.6])])
+    provider = OpenAICompatEmbeddingProvider(model="baai/bge-m3", base_url="http://x", api_key="k", client=cliente)
+    assert provider.embed_query("carnet") == [0.5, 0.6]
+    assert cliente.embeddings.llamadas[0]["extra_body"]["input_type"] == "query"
 ```
 
-- [ ] **Step 2: Correr y verificar que falla**
+- [ ] **Step 3: Correr y verificar que falla**
 
 Run: `.venv/bin/pytest tests/test_providers.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'providers.anthropic_chat'`.
 
-- [ ] **Step 3: Implementar providers/base.py**
+- [ ] **Step 4: Implementar providers/base.py**
 
 ```python
 from typing import Iterator, Protocol
@@ -292,7 +411,128 @@ class EmbeddingProvider(Protocol):
     def embed_query(self, text: str) -> list[float]: ...
 ```
 
-- [ ] **Step 4: Implementar providers/anthropic_chat.py**
+- [ ] **Step 5: Implementar providers/openai_compat.py (proveedor primario)**
+
+```python
+import json
+import logging
+import re
+import time
+from typing import Iterator
+
+from openai import APIError, OpenAI
+
+logger = logging.getLogger(__name__)
+
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _extraer_json(texto: str) -> dict | None:
+    match = _JSON_RE.search(texto or "")
+    if not match:
+        return None
+    try:
+        datos = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    return datos if isinstance(datos, dict) else None
+
+
+class OpenAICompatChatProvider:
+    """ChatProvider sobre cualquier API OpenAI-compatible (NVIDIA NIM, Ollama, vLLM...).
+
+    Sin parámetros de sampling: se usan los defaults del servidor.
+    """
+
+    def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None):
+        self.model = model
+        self._client = client or OpenAI(base_url=base_url, api_key=api_key)
+
+    def _mensajes(self, system: str, messages: list[dict]) -> list[dict]:
+        return [{"role": "system", "content": system}, *messages]
+
+    def complete(self, *, system: str, messages: list[dict], max_tokens: int = 1024) -> str:
+        respuesta = self._client.chat.completions.create(
+            model=self.model, messages=self._mensajes(system, messages), max_tokens=max_tokens
+        )
+        return respuesta.choices[0].message.content or ""
+
+    def complete_json(self, *, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None:
+        """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
+        try:
+            try:
+                # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
+                respuesta = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=self._mensajes(system, messages),
+                    max_tokens=max_tokens,
+                    extra_body={"nvext": {"guided_json": schema}},
+                )
+            except Exception:
+                respuesta = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=self._mensajes(
+                        system + "\nRespondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional.",
+                        messages,
+                    ),
+                    max_tokens=max_tokens,
+                )
+            return _extraer_json(respuesta.choices[0].message.content or "")
+        except Exception:
+            logger.warning("complete_json falló para %s", self.model, exc_info=True)
+            return None
+
+    def stream(self, *, system: str, messages: list[dict], max_tokens: int = 4096) -> Iterator[str]:
+        chunks = self._client.chat.completions.create(
+            model=self.model,
+            messages=self._mensajes(system, messages),
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        for chunk in chunks:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+
+
+class OpenAICompatEmbeddingProvider:
+    """EmbeddingProvider sobre /v1/embeddings OpenAI-compatible (modelos retrieval de NVIDIA NIM)."""
+
+    _TAMANO_LOTE = 32
+
+    def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None):
+        self.model = model
+        self._client = client or OpenAI(base_url=base_url, api_key=api_key)
+
+    def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
+        respuesta = self._client.embeddings.create(
+            model=self.model,
+            input=texts,
+            extra_body={"input_type": input_type, "truncate": "END"},
+        )
+        return [d.embedding for d in respuesta.data]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        vectores: list[list[float]] = []
+        for i in range(0, len(texts), self._TAMANO_LOTE):
+            lote = texts[i : i + self._TAMANO_LOTE]
+            for intento in range(3):
+                try:
+                    vectores.extend(self._embed(lote, "passage"))
+                    break
+                except APIError as error:
+                    if intento == 2:
+                        raise
+                    espera = 15 * (intento + 1)
+                    logger.warning("embeddings falló (%s), reintento en %ss", error, espera)
+                    time.sleep(espera)
+        return vectores
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed([text], "query")[0]
+```
+
+- [ ] **Step 6: Implementar providers/anthropic_chat.py (alternativo)**
 
 ```python
 import json
@@ -342,7 +582,7 @@ class AnthropicChatProvider:
             yield from s.text_stream
 ```
 
-- [ ] **Step 5: Implementar providers/voyage_embeddings.py**
+- [ ] **Step 7: Implementar providers/voyage_embeddings.py (alternativo)**
 
 ```python
 import voyageai
@@ -373,7 +613,7 @@ class VoyageEmbeddingProvider:
         return resultado.embeddings[0]
 ```
 
-- [ ] **Step 6: Implementar providers/factory.py**
+- [ ] **Step 8: Implementar providers/factory.py**
 
 ```python
 import os
@@ -381,48 +621,79 @@ import os
 from dotenv import load_dotenv
 
 from providers.anthropic_chat import AnthropicChatProvider
+from providers.base import ChatProvider, EmbeddingProvider
+from providers.openai_compat import OpenAICompatChatProvider, OpenAICompatEmbeddingProvider
 from providers.voyage_embeddings import VoyageEmbeddingProvider
 
 load_dotenv()
 
-
-def chat_potente() -> AnthropicChatProvider:
-    return AnthropicChatProvider(os.environ.get("MODELO_POTENTE", "claude-sonnet-5"))
+_NVIDIA_BASE_URL_DEFAULT = "https://integrate.api.nvidia.com/v1"
 
 
-def chat_economico() -> AnthropicChatProvider:
-    return AnthropicChatProvider(os.environ.get("MODELO_ECONOMICO", "claude-haiku-4-5"))
+def _proveedor() -> str:
+    return os.environ.get("PROVIDER", "nvidia").lower()
 
 
-def embedder() -> VoyageEmbeddingProvider:
-    return VoyageEmbeddingProvider(
-        model=os.environ.get("MODELO_EMBEDDINGS", "voyage-4-lite"),
-        output_dimension=int(os.environ.get("EMBEDDING_DIM", "512")),
+def _nvidia_chat(modelo: str) -> OpenAICompatChatProvider:
+    return OpenAICompatChatProvider(
+        model=modelo,
+        base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_BASE_URL_DEFAULT),
+        api_key=os.environ.get("NVIDIA_API_KEY", ""),
+    )
+
+
+def chat_potente() -> ChatProvider:
+    if _proveedor() == "anthropic":
+        return AnthropicChatProvider(os.environ.get("MODELO_POTENTE", "claude-sonnet-5"))
+    return _nvidia_chat(os.environ.get("MODELO_POTENTE", "meta/llama-3.3-70b-instruct"))
+
+
+def chat_economico() -> ChatProvider:
+    if _proveedor() == "anthropic":
+        return AnthropicChatProvider(os.environ.get("MODELO_ECONOMICO", "claude-haiku-4-5"))
+    return _nvidia_chat(os.environ.get("MODELO_ECONOMICO", "meta/llama-3.1-8b-instruct"))
+
+
+def embedder() -> EmbeddingProvider:
+    if _proveedor() == "anthropic":
+        return VoyageEmbeddingProvider(
+            model=os.environ.get("MODELO_EMBEDDINGS", "voyage-4-lite"),
+            output_dimension=int(os.environ.get("EMBEDDING_DIM", "1024")),
+        )
+    return OpenAICompatEmbeddingProvider(
+        model=os.environ.get("MODELO_EMBEDDINGS", "baai/bge-m3"),
+        base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_BASE_URL_DEFAULT),
+        api_key=os.environ.get("NVIDIA_API_KEY", ""),
     )
 ```
 
-- [ ] **Step 7: Correr los tests**
+- [ ] **Step 9: Correr los tests**
 
 Run: `.venv/bin/pytest tests/test_providers.py -v`
-Expected: 3 passed.
+Expected: 9 passed.
 
-- [ ] **Step 8: Smoke test real contra las APIs (requiere keys en .env)**
+- [ ] **Step 10: Smoke test real contra NVIDIA NIM (solo si hay key real en .env)**
 
 Run:
 ```bash
-.venv/bin/python -c "
+if grep -Eq '^NVIDIA_API_KEY=nvapi-[A-Za-z0-9_-]{20,}' .env; then
+  .venv/bin/python - <<'EOF'
 from providers import factory
-print(factory.chat_economico().complete(system='Respondé en una palabra.', messages=[{'role':'user','content':'¿Capital de Bolivia (sede de gobierno)?'}]))
-v = factory.embedder().embed_query('carnet de identidad')
-print(len(v), type(v[0]))"
+print(factory.chat_economico().complete(system="Respondé en una sola palabra.", messages=[{"role": "user", "content": "¿Capital administrativa de Bolivia?"}]))
+v = factory.embedder().embed_query("carnet de identidad")
+print(len(v), type(v[0]))
+EOF
+else
+  echo "SIN NVIDIA_API_KEY real en .env — smoke test diferido; reportar como concern"
+fi
 ```
-Expected: una palabra tipo `La Paz`, y `512 <class 'float'>`.
+Expected: una palabra tipo `La Paz` y `1024 <class 'float'>` — o el mensaje de diferido si aún no hay key (no es un fallo del task; se re-corre cuando el usuario la agregue).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add providers/ tests/test_providers.py
-git commit -m "feat: providers de chat (Anthropic) y embeddings (Voyage) detras de protocolos"
+git add providers/ tests/test_providers.py requirements.txt .env.example db/schema.sql
+git commit -m "feat: capa de providers con NVIDIA NIM primario y Anthropic/Voyage alternativos"
 ```
 
 ---
@@ -764,7 +1035,7 @@ from db.queries import (
     listar_eventos,
 )
 
-DIM = 512
+DIM = 1024
 
 
 def _fila(id_, nombre, **overrides):
@@ -1364,10 +1635,10 @@ class FakeChat:
 
 class FakeEmbedder:
     def embed_documents(self, texts):
-        return [[0.0] * 512 for _ in texts]
+        return [[0.0] * 1024 for _ in texts]
 
     def embed_query(self, text):
-        return [0.0] * 512
+        return [0.0] * 1024
 
 
 def _deps(**kwargs):
@@ -1837,7 +2108,7 @@ git commit -m "feat: endpoint POST /chat con streaming SSE"
 - Consumes: `factory.embedder()` (Task 2), `buscar_tramites` (Task 4), `get_connection` (Task 1).
 - Produces: script `python tests/eval_retrieval.py` que imprime hit@1, hit@5, distancias top-2 y gap por caso.
 
-- [ ] **Step 1: Carga completa del dataset (requiere ambas API keys; genera 1,739 embeddings + ~23 llamadas a Sonnet)**
+- [ ] **Step 1: Carga completa del dataset (requiere NVIDIA_API_KEY; genera 1,739 embeddings + ~23 llamadas al modelo potente)**
 
 Run:
 ```bash
@@ -1965,24 +2236,25 @@ Docs: `CLAUDE.md` (spec original) · `DECISIONS.md` (decisiones) ·
 ## Requisitos
 
 - Python 3.11+, Docker + docker compose
-- API keys: [Anthropic](https://console.anthropic.com) y [Voyage AI](https://dash.voyageai.com)
+- API key gratuita de [NVIDIA Build](https://build.nvidia.com) (formato `nvapi-...`)
+  — alternativa: `PROVIDER=anthropic` con keys de Anthropic + Voyage
 
 ## Setup
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env    # completar ANTHROPIC_API_KEY y VOYAGE_API_KEY
+cp .env.example .env    # completar NVIDIA_API_KEY
 docker compose up -d    # Postgres+pgvector en localhost:5433
 ```
 
-## Cargar los datos (una vez, ~2-3 min)
+## Cargar los datos (una vez, ~3-5 min)
 
 ```bash
 .venv/bin/python -m ingest.load
 ```
 
-Descarga los ~1,700 trámites, extrae costos faltantes con Claude Sonnet,
-genera embeddings con Voyage y los guarda en Postgres.
+Descarga los ~1,700 trámites, extrae costos faltantes con el modelo potente
+(llama-3.3-70b), genera embeddings (bge-m3) y los guarda en Postgres.
 
 ## Correr el API
 
@@ -2050,7 +2322,8 @@ git commit -m "docs: README con setup y uso del demo"
 
 ## Notas para el ejecutor
 
-- Los Tasks 1–8 se pueden hacer con `--skip-llm`/30 filas para no gastar API; la carga completa recién en Task 9.
-- Si la API de Voyage rechaza `voyage-4-lite`, usar `voyage-3.5-lite` con `output_dimension=512` (mismo esquema) vía env var `MODELO_EMBEDDINGS` — no tocar código.
-- Si `output_config` es rechazado por una versión vieja del SDK `anthropic`, actualizar el SDK (`pip install -U anthropic`), no cambiar el approach.
+- Los Tasks 1–8 se pueden hacer con `--skip-llm`/30 filas para no gastar cuota de API; la carga completa recién en Task 9.
+- El free tier de NVIDIA Build tiene rate limit (~40 req/min): `OpenAICompatEmbeddingProvider` ya reintenta con espera ante errores; si la ingesta completa se corta, re-correrla es seguro (upsert idempotente).
+- Si un modelo NIM rechaza `nvext.guided_json`, `complete_json` ya cae solo a prompt+parseo — no tocar código.
+- Modelos alternativos por env var sin tocar código: otros chat NIM (`qwen/…`, `deepseek-ai/…`, `nvidia/llama-3.3-nemotron-super-49b-v1.5`) vía `MODELO_*`, o `PROVIDER=anthropic` con keys de Anthropic/Voyage.
 - Los umbrales de `api/confidence.py` son valores de partida deliberados; el Task 9 existe para ajustarlos con datos reales.
