@@ -307,6 +307,17 @@ def test_anthropic_complete_json_devuelve_none_con_json_invalido():
     assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
 
 
+def test_anthropic_complete_json_nunca_lanza():
+    class ClienteQueExplota:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                raise TypeError("shape inesperado")
+
+    provider = AnthropicChatProvider(model="claude-haiku-4-5", client=ClienteQueExplota())
+    assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
+
+
 # ---------- fakes de cliente OpenAI-compatible (NVIDIA NIM) ----------
 
 
@@ -561,6 +572,7 @@ class AnthropicChatProvider:
         return "".join(b.text for b in respuesta.content if b.type == "text")
 
     def complete_json(self, *, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None:
+        """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
         try:
             respuesta = self._client.messages.create(
                 model=self.model,
@@ -571,7 +583,7 @@ class AnthropicChatProvider:
             )
             texto = next((b.text for b in respuesta.content if b.type == "text"), None)
             return json.loads(texto) if texto else None
-        except (anthropic.APIError, json.JSONDecodeError, StopIteration):
+        except Exception:
             logger.warning("complete_json falló para %s", self.model, exc_info=True)
             return None
 
@@ -670,7 +682,7 @@ def embedder() -> EmbeddingProvider:
 - [ ] **Step 9: Correr los tests**
 
 Run: `.venv/bin/pytest tests/test_providers.py -v`
-Expected: 9 passed.
+Expected: 10 passed.
 
 - [ ] **Step 10: Smoke test real contra NVIDIA NIM (solo si hay key real en .env)**
 
