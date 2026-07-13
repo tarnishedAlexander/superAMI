@@ -64,6 +64,7 @@ def test_mapear_canal():
     assert mapear_canal({"esPresencial": True, "esVirtual": True}) == "ambos"
     assert mapear_canal({"esPresencial": False, "esVirtual": True}) == "virtual"
     assert mapear_canal({"esPresencial": False, "esVirtual": False}) is None
+    assert mapear_canal({"esPresencial": True, "esVirtual": False}) == "presencial"
 
 
 def test_mapear_costo_directo():
@@ -126,3 +127,4 @@ def test_texto_para_embedding():
     texto = texto_para_embedding(fila)
     assert "SOLICITUD DE COPIAS SIMPLES" in texto
     assert "copias aduana" in texto
+    assert "Copias simples de documentos aduaneros." in texto
