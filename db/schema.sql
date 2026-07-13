@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS tramites (
   enlaces jsonb NOT NULL DEFAULT '[]',
   canal text,
   digitalizado boolean NOT NULL DEFAULT false,
-  embedding vector(512),
+  embedding vector(1024),
   last_updated date
 );
 
