@@ -1,0 +1,15 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ami
+      POSTGRES_PASSWORD: ami
+      POSTGRES_DB: ami
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ami_pgdata:/var/lib/postgresql/data
+
+volumes:
+  ami_pgdata:
