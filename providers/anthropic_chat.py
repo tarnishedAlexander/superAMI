@@ -24,6 +24,7 @@ class AnthropicChatProvider:
         return "".join(b.text for b in respuesta.content if b.type == "text")
 
     def complete_json(self, *, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None:
+        """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
         try:
             respuesta = self._client.messages.create(
                 model=self.model,
@@ -34,7 +35,7 @@ class AnthropicChatProvider:
             )
             texto = next((b.text for b in respuesta.content if b.type == "text"), None)
             return json.loads(texto) if texto else None
-        except (anthropic.APIError, json.JSONDecodeError, StopIteration):
+        except Exception:
             logger.warning("complete_json falló para %s", self.model, exc_info=True)
             return None
 

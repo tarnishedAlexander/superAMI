@@ -57,6 +57,17 @@ def test_anthropic_complete_json_devuelve_none_con_json_invalido():
     assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
 
 
+def test_anthropic_complete_json_nunca_lanza():
+    class ClienteQueExplota:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                raise TypeError("shape inesperado")
+
+    provider = AnthropicChatProvider(model="claude-haiku-4-5", client=ClienteQueExplota())
+    assert provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={}) is None
+
+
 # ---------- fakes de cliente OpenAI-compatible (NVIDIA NIM) ----------
 
 
