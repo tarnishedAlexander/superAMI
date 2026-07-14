@@ -125,6 +125,17 @@ def test_openai_complete_json_fallback_sin_guided():
     assert "extra_body" not in cliente.chat.completions.llamadas[1]
 
 
+def test_openai_complete_json_fallback_cuando_guided_devuelve_prosa():
+    # NIM puede ignorar guided_json silenciosamente: 200 OK con prosa en vez de JSON
+    cliente = _fake_openai(chat=[_resp_chat("monto: 50, moneda: Bs"), _resp_chat('{"a": 3}')])
+    provider = OpenAICompatChatProvider(model="m", base_url="http://x", api_key="k", client=cliente)
+    datos = provider.complete_json(system="s", messages=[{"role": "user", "content": "m"}], schema={"type": "object"})
+    assert datos == {"a": 3}
+    llamadas = cliente.chat.completions.llamadas
+    assert "extra_body" not in llamadas[1]
+    assert "JSON" in llamadas[1]["messages"][0]["content"]
+
+
 def test_openai_complete_json_nunca_lanza():
     cliente = _fake_openai(chat=[RuntimeError("boom"), RuntimeError("boom")])
     provider = OpenAICompatChatProvider(model="m", base_url="http://x", api_key="k", client=cliente)

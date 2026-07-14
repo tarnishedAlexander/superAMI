@@ -44,6 +44,7 @@ class OpenAICompatChatProvider:
     def complete_json(self, *, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None:
         """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
         try:
+            datos = None
             try:
                 # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
                 respuesta = self._client.chat.completions.create(
@@ -52,7 +53,11 @@ class OpenAICompatChatProvider:
                     max_tokens=max_tokens,
                     extra_body={"nvext": {"guided_json": schema}},
                 )
+                datos = _extraer_json(respuesta.choices[0].message.content or "")
             except Exception:
+                pass
+            if datos is None:
+                # algunos endpoints ignoran guided_json sin error y devuelven prosa
                 respuesta = self._client.chat.completions.create(
                     model=self.model,
                     messages=self._mensajes(
@@ -61,7 +66,8 @@ class OpenAICompatChatProvider:
                     ),
                     max_tokens=max_tokens,
                 )
-            return _extraer_json(respuesta.choices[0].message.content or "")
+                datos = _extraer_json(respuesta.choices[0].message.content or "")
+            return datos
         except Exception:
             logger.warning("complete_json falló para %s", self.model, exc_info=True)
             return None
