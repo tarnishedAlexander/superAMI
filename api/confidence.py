@@ -1,8 +1,14 @@
 from typing import Literal
 
-# Valores de partida — calibrar con tests/eval_retrieval.py (ver Task 9).
-UMBRAL_GAP = 0.05
-UMBRAL_DISTANCIA_MAX = 0.55
+# Calibrados el 2026-07-14 con tests/eval_retrieval.py sobre el dataset completo
+# (1,739 trámites, bge-m3 @ 1024 dims). En esa corrida: los top-1 correctos con
+# gap >= 0.028 eran todos aciertos y los top-1 incorrectos tenían gap <= 0.026,
+# así que 0.03 separa ambos grupos; el d1 máximo de un acierto fue 0.511, por eso
+# 0.52 (la consulta sin match más lejana, d1 0.641, queda gateada). Los gaps chicos
+# (<0.03) suelen ser variantes legítimas del mismo trámite (original vs. duplicado)
+# donde preguntar es mejor UX que adivinar.
+UMBRAL_GAP = 0.03
+UMBRAL_DISTANCIA_MAX = 0.52
 
 
 def evaluar_confianza(
