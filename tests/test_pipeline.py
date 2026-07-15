@@ -69,7 +69,7 @@ def test_caso_claro_streamea_respuesta(monkeypatch):
 
 
 def test_caso_ambiguo_pregunta_aclaracion(monkeypatch):
-    _preparar(monkeypatch, [_hit(1, "A", 0.30), _hit(2, "B", 0.31)])
+    _preparar(monkeypatch, [_hit(1, "A", 0.300), _hit(2, "B", 0.301)])
     deps = _deps()
     cid = deps.store.get_or_create(None)
     eventos = list(procesar_mensaje(deps, cid, "papel"))
@@ -99,9 +99,47 @@ def test_error_interno_emite_evento_error(monkeypatch):
 
 
 def test_aclaracion_concatena_consulta(monkeypatch):
-    _preparar(monkeypatch, [_hit(1, "A", 0.30), _hit(2, "B", 0.31)])
+    _preparar(monkeypatch, [_hit(1, "A", 0.300), _hit(2, "B", 0.301)])
     deps = _deps()
     cid = deps.store.get_or_create(None)
     list(procesar_mensaje(deps, cid, "papel del carro"))
     deps.store.append(cid, "user", "el de propiedad")
     assert deps.store.texto_de_consulta(cid) == "papel del carro el de propiedad"
+
+
+def test_lejano_responde_no_encontrado(monkeypatch):
+    # d1 > 0.52 (umbral default): el gate dice "lejano", no se pregunta ni se sintetiza
+    _preparar(monkeypatch, [_hit(1, "ALGO LEJANO", 0.80), _hit(2, "OTRO", 0.99)])
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos = list(procesar_mensaje(deps, cid, "algo rarísimo"))
+    assert eventos[0][0] == "answer"
+    assert "No encontré" in eventos[0][1]["delta"]
+
+
+def test_segunda_ambigua_fuerza_respuesta(monkeypatch):
+    # primera pasada ambigua -> aclaración; segunda pasada ambigua -> respuesta forzada
+    _preparar(monkeypatch, [_hit(1, "A", 0.300), _hit(2, "B", 0.301)])
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos1 = list(procesar_mensaje(deps, cid, "papel"))
+    assert eventos1[0][0] == "clarification"
+    eventos2 = list(procesar_mensaje(deps, cid, "no sé, el común"))
+    assert eventos2[0][0] == "answer"
+    assert eventos2[-1] == ("answer", {"done": True, "tramite_ids": [1]})
+
+
+def test_respuesta_forzada_pasa_alternativas_al_prompt(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "A", 0.300), _hit(2, "B", 0.301), _hit(3, "C", 0.330)])
+    capturado = {}
+
+    class ChatEspia(FakeChat):
+        def stream(self, *, system, messages, max_tokens=4096):
+            capturado["system"] = system
+            yield "ok"
+
+    deps = _deps(potente=ChatEspia())
+    cid = deps.store.get_or_create(None)
+    list(procesar_mensaje(deps, cid, "papel"))          # aclaración
+    list(procesar_mensaje(deps, cid, "sigo sin saber"))  # forzada
+    assert "B" in capturado["system"] and "C" in capturado["system"]

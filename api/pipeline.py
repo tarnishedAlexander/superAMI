@@ -88,31 +88,38 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
                 # fail-open: los filtros pueden haber sido mal inferidos
                 hits = buscar_tramites(conn, embedding)
 
-        if not hits:
+        veredicto = evaluar_confianza([h["distancia"] for h in hits])
+
+        if veredicto in ("vacio", "lejano"):
             fetch_live_fallback(consulta)
-            deps.store.append(conversation_id, "assistant", MENSAJE_NO_ENCONTRADO)
+            deps.store.append(conversation_id, "assistant", MENSAJE_NO_ENCONTRADO, tipo="not_found")
             yield ("answer", {"delta": MENSAJE_NO_ENCONTRADO})
             yield ("answer", {"done": True, "tramite_ids": []})
             return
 
-        veredicto = evaluar_confianza([h["distancia"] for h in hits])
-
-        if veredicto == "ambiguo":
+        if veredicto == "ambiguo" and deps.store.contar_aclaraciones(conversation_id) == 0:
             pregunta = formular_aclaracion(deps, consulta, hits[:3])
-            deps.store.append(conversation_id, "assistant", pregunta)
+            deps.store.append(conversation_id, "assistant", pregunta, tipo="clarification")
             yield ("clarification", {"text": pregunta})
             return
 
+        # claro, o ambiguo con el tope de 1 aclaración alcanzado: responder igual, con transparencia
+        forzado = veredicto == "ambiguo"
         top = hits[0]
+        alternativas = (
+            [{"nombre": h["nombre"], "entidad_nombre": h.get("entidad_nombre")} for h in hits[1:4]]
+            if forzado
+            else None
+        )
         partes: list[str] = []
         for delta in deps.chat_potente.stream(
-            system=system_de_sintesis(top),
+            system=system_de_sintesis(top, alternativas=alternativas),
             messages=deps.store.mensajes(conversation_id),
             max_tokens=4096,
         ):
             partes.append(delta)
             yield ("answer", {"delta": delta})
-        deps.store.append(conversation_id, "assistant", "".join(partes))
+        deps.store.append(conversation_id, "assistant", "".join(partes), tipo="answer")
         yield ("answer", {"done": True, "tramite_ids": [top["id"]]})
     except Exception:
         logger.exception("error procesando mensaje en conversación %s", conversation_id)

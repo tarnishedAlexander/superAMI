@@ -37,13 +37,23 @@ SISTEMA_SINTESIS = """Sos AMI, asistente de trámites del Estado boliviano. Resp
 
 Reglas estrictas:
 - Usá ÚNICAMENTE los datos del trámite provistos en <tramite>. No inventes requisitos, costos, plazos ni oficinas.
-- Si un dato que el ciudadano pide no está en <tramite>, decilo explícitamente ("ese dato no figura en la ficha del trámite").
+- Si un dato que el ciudadano pide no está en <tramite>: decilo sin rodeos, resumí en una o dos líneas qué información SÍ tiene la ficha (requisitos, costo, dónde se hace), y si hay una URL en enlaces o modalidades indicá que ahí puede figurar el dato faltante. Nunca respondas solo "ese dato no figura".
 - Si el trámite es virtual y hay URL en modalidades o enlaces, incluila.
 - Si costo_es_gratuito es true, aclarar que es gratuito. Si hay costo_monto, dar monto y moneda (UFV = Unidad de Fomento a la Vivienda).
 - Respondé la pregunta puntual del ciudadano primero; después agregá lo esencial (requisitos, dónde/cómo, costo).
 - Formato: texto corrido con listas cortas si ayudan. Sin encabezados grandes."""
 
 
-def system_de_sintesis(tramite: dict) -> str:
+def system_de_sintesis(tramite: dict, alternativas: list[dict] | None = None) -> str:
     datos = {k: v for k, v in tramite.items() if k != "distancia"}
-    return SISTEMA_SINTESIS + "\n\n<tramite>\n" + json.dumps(datos, ensure_ascii=False, default=str) + "\n</tramite>"
+    base = SISTEMA_SINTESIS + "\n\n<tramite>\n" + json.dumps(datos, ensure_ascii=False, default=str) + "\n</tramite>"
+    if alternativas:
+        lineas = "\n".join(
+            f"- {a['nombre']} ({a.get('entidad_nombre') or 'entidad desconocida'})" for a in alternativas
+        )
+        base += (
+            "\n\nAtención: la coincidencia con la consulta NO es segura. Abrí la respuesta aclarando qué "
+            'trámite estás mostrando (ej. "Te muestro el que mejor coincide con tu consulta: ...") y cerrá '
+            "mencionando en una línea estas alternativas por si buscaba otra cosa:\n" + lineas
+        )
+    return base
