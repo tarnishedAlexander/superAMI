@@ -4,7 +4,15 @@ from typing import Iterator
 
 from api.confidence import evaluar_confianza
 from api.conversations import ConversationStore
-from api.prompts import SISTEMA_ACLARACION, SISTEMA_FILTROS, schema_filtros, system_de_sintesis, usuario_aclaracion
+from api.live_fetch import buscar_en_vivo
+from api.prompts import (
+    SISTEMA_ACLARACION,
+    SISTEMA_FILTROS,
+    schema_filtros,
+    system_de_sintesis,
+    system_de_sintesis_en_vivo,
+    usuario_aclaracion,
+)
 from db.connection import get_connection
 from db.queries import buscar_entidad_slug, buscar_tramites, registrar_consulta
 from providers.base import ChatProvider, EmbeddingProvider
@@ -24,12 +32,6 @@ class Deps:
     embedder: EmbeddingProvider
     store: ConversationStore
     catalogos: dict
-
-
-def fetch_live_fallback(consulta: str) -> None:
-    # TODO fase "MVP completo" (ver ROADMAP.md): fetch de la página externa vía
-    # el campo `enlaces` del registro más cercano + extracción con el modelo potente.
-    return None
 
 
 def inferir_filtros(deps: Deps, consulta: str) -> dict:
@@ -115,10 +117,23 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
         veredicto = evaluar_confianza([h["distancia"] for h in hits])
 
         if veredicto in ("vacio", "lejano"):
-            fetch_live_fallback(consulta)
-            deps.store.append(conversation_id, "assistant", MENSAJE_NO_ENCONTRADO, tipo="not_found")
-            _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "not_found")
-            yield ("answer", {"delta": MENSAJE_NO_ENCONTRADO})
+            datos_vivos = buscar_en_vivo(deps.chat_potente, hits[:3])
+            if datos_vivos is None:
+                deps.store.append(conversation_id, "assistant", MENSAJE_NO_ENCONTRADO, tipo="not_found")
+                _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "not_found")
+                yield ("answer", {"delta": MENSAJE_NO_ENCONTRADO})
+                yield ("answer", {"done": True, "tramite_ids": []})
+                return
+            partes = []
+            for delta in deps.chat_potente.stream(
+                system=system_de_sintesis_en_vivo(datos_vivos),
+                messages=deps.store.mensajes(conversation_id),
+                max_tokens=4096,
+            ):
+                partes.append(delta)
+                yield ("answer", {"delta": delta})
+            deps.store.append(conversation_id, "assistant", "".join(partes), tipo="answer")
+            _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "answer")
             yield ("answer", {"done": True, "tramite_ids": []})
             return
 

@@ -174,3 +174,25 @@ def test_log_roto_no_rompe_la_respuesta(monkeypatch):
     cid = deps.store.get_or_create(None)
     eventos = list(procesar_mensaje(deps, cid, "quiero sacar mi carnet"))
     assert eventos[-1] == ("answer", {"done": True, "tramite_ids": [1]})
+
+
+def test_lejano_con_fetch_vivo_streamea_respuesta(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CERCANO CON LINK", 0.80)])
+    monkeypatch.setattr(
+        pipeline, "buscar_en_vivo",
+        lambda chat, candidatos: {"url": "https://x.gob.bo", "texto": "requisitos: CI", "costo": None},
+    )
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos = list(procesar_mensaje(deps, cid, "algo raro"))
+    assert ("answer", {"delta": "Hola"}) in eventos
+    assert eventos[-1] == ("answer", {"done": True, "tramite_ids": []})
+
+
+def test_lejano_sin_fetch_vivo_cae_a_no_encontrado(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CERCANO", 0.80)])
+    monkeypatch.setattr(pipeline, "buscar_en_vivo", lambda chat, candidatos: None)
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos = list(procesar_mensaje(deps, cid, "algo raro"))
+    assert "No encontré" in eventos[0][1]["delta"]

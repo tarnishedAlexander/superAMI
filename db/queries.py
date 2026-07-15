@@ -200,3 +200,21 @@ def guardar_sync_state(conn) -> None:
         ON CONFLICT (id) DO UPDATE SET last_sync = EXCLUDED.last_sync, updated_at = now()
         """
     )
+
+
+def leer_fetch_cache(conn, url: str, ttl_dias: int = 7) -> dict | None:
+    fila = conn.execute(
+        "SELECT datos FROM fetch_cache WHERE url = %s AND fetched_at > now() - make_interval(days => %s)",
+        (url, ttl_dias),
+    ).fetchone()
+    return fila[0] if fila else None
+
+
+def guardar_fetch_cache(conn, url: str, datos: dict) -> None:
+    conn.execute(
+        """
+        INSERT INTO fetch_cache (url, datos, fetched_at) VALUES (%s, %s, now())
+        ON CONFLICT (url) DO UPDATE SET datos = EXCLUDED.datos, fetched_at = now()
+        """,
+        (url, Json(datos)),
+    )

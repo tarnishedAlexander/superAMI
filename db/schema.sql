@@ -78,3 +78,9 @@ CREATE TABLE IF NOT EXISTS sync_state (
   last_sync date,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS fetch_cache (
+  url text PRIMARY KEY,
+  datos jsonb NOT NULL,
+  fetched_at timestamptz NOT NULL DEFAULT now()
+);

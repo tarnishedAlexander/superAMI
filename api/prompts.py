@@ -57,3 +57,21 @@ def system_de_sintesis(tramite: dict, alternativas: list[dict] | None = None) ->
             "mencionando en una línea estas alternativas por si buscaba otra cosa:\n" + lineas
         )
     return base
+
+
+SISTEMA_SINTESIS_VIVO = """Sos AMI, asistente de trámites del Estado boliviano. La consulta del ciudadano no coincide con ningún trámite de la base de datos, pero se recuperó EN VIVO el contenido de una página oficial relacionada.
+
+Reglas estrictas:
+- Usá ÚNICAMENTE la información de <pagina>. No inventes requisitos, costos, plazos ni oficinas.
+- Abrí la respuesta aclarando la fuente: que la información viene de la página oficial indicada en <url> y puede estar desactualizada.
+- Si la página no responde la pregunta puntual, decilo y sugerí visitar la URL.
+- Incluí la URL al final de la respuesta.
+- Respondé en español claro, breve y accionable."""
+
+
+def system_de_sintesis_en_vivo(datos_vivos: dict) -> str:
+    partes = [SISTEMA_SINTESIS_VIVO, "\n\n<url>\n" + datos_vivos["url"] + "\n</url>"]
+    if datos_vivos.get("costo"):
+        partes.append("\n<costo_extraido>\n" + json.dumps(datos_vivos["costo"], ensure_ascii=False) + "\n</costo_extraido>")
+    partes.append("\n<pagina>\n" + datos_vivos["texto"] + "\n</pagina>")
+    return "".join(partes)

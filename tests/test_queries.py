@@ -127,3 +127,16 @@ def test_estado_tramites_y_sync_state(conn):
     conn.commit()
     fila = conn.execute("SELECT last_sync FROM sync_state WHERE id = 1").fetchone()
     assert fila[0] is not None
+
+
+def test_fetch_cache_roundtrip_y_ttl(conn):
+    from db.queries import guardar_fetch_cache, leer_fetch_cache
+
+    guardar_fetch_cache(conn, "https://test.gob.bo/t", {"url": "https://test.gob.bo/t", "texto": "hola", "costo": None})
+    conn.commit()
+    assert leer_fetch_cache(conn, "https://test.gob.bo/t")["texto"] == "hola"
+    conn.execute("UPDATE fetch_cache SET fetched_at = now() - interval '8 days' WHERE url = 'https://test.gob.bo/t'")
+    conn.commit()
+    assert leer_fetch_cache(conn, "https://test.gob.bo/t", ttl_dias=7) is None
+    conn.execute("DELETE FROM fetch_cache WHERE url = 'https://test.gob.bo/t'")
+    conn.commit()
