@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.conversations import ConversationStore
+from api.conversations_pg import PostgresConversationStore
 from api.pipeline import Deps, procesar_mensaje
 from db.connection import get_connection
 from db.queries import listar_categorias, listar_eventos
@@ -28,11 +28,13 @@ def get_deps() -> Deps:
                 "categorias": [c["slug"] for c in listar_categorias(conn)],
                 "eventos": listar_eventos(conn),
             }
+        store = PostgresConversationStore()
+        store.limpiar_viejas(horas=24)
         _deps = Deps(
             chat_economico=factory.chat_economico(),
             chat_potente=factory.chat_potente(),
             embedder=factory.embedder(),
-            store=ConversationStore(),
+            store=store,
             catalogos=catalogos,
         )
     return _deps

@@ -84,3 +84,10 @@ CREATE TABLE IF NOT EXISTS fetch_cache (
   datos jsonb NOT NULL,
   fetched_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS conversaciones (
+  id text PRIMARY KEY,
+  mensajes jsonb NOT NULL DEFAULT '[]',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
