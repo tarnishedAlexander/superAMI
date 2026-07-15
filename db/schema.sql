@@ -57,3 +57,16 @@ CREATE TABLE IF NOT EXISTS tramites_eventos (
 
 CREATE INDEX IF NOT EXISTS idx_tramites_embedding
   ON tramites USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS consultas_log (
+  id bigserial PRIMARY KEY,
+  ts timestamptz NOT NULL DEFAULT now(),
+  conversation_id text,
+  mensaje text NOT NULL,
+  consulta_acumulada text,
+  filtros jsonb,
+  top_ids integer[],
+  top_distancias real[],
+  veredicto text,
+  respuesta_tipo text
+);

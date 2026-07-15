@@ -80,3 +80,20 @@ def test_filtros_y_catalogos(conn):
     assert any(h["id"] == 900004 for h in con_filtro)
     sin_match = buscar_tramites(conn, _vec(1.0), categoria_slug="categoria-inexistente")
     assert sin_match == []
+
+
+def test_registrar_consulta(conn):
+    from db.queries import registrar_consulta
+
+    registrar_consulta(conn, {
+        "conversation_id": "test-log-1", "mensaje": "hola", "consulta_acumulada": "hola",
+        "filtros": {"categoria_slug": "empresas"}, "top_ids": [1, 2],
+        "top_distancias": [0.2, 0.4], "veredicto": "claro", "respuesta_tipo": "answer",
+    })
+    conn.commit()
+    fila = conn.execute(
+        "SELECT veredicto, respuesta_tipo, top_ids FROM consultas_log WHERE conversation_id = 'test-log-1'"
+    ).fetchone()
+    assert fila == ("claro", "answer", [1, 2])
+    conn.execute("DELETE FROM consultas_log WHERE conversation_id = 'test-log-1'")
+    conn.commit()

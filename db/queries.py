@@ -165,3 +165,15 @@ def buscar_tramites(
             fila["costo_monto"] = float(fila["costo_monto"])
         filas.append(fila)
     return filas
+
+
+def registrar_consulta(conn, datos: dict) -> None:
+    conn.execute(
+        """
+        INSERT INTO consultas_log
+          (conversation_id, mensaje, consulta_acumulada, filtros, top_ids, top_distancias, veredicto, respuesta_tipo)
+        VALUES (%(conversation_id)s, %(mensaje)s, %(consulta_acumulada)s, %(filtros)s,
+                %(top_ids)s, %(top_distancias)s, %(veredicto)s, %(respuesta_tipo)s)
+        """,
+        {**datos, "filtros": Json(datos["filtros"]) if datos.get("filtros") else None},
+    )

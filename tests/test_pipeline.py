@@ -47,9 +47,14 @@ def _hit(id_, nombre, distancia):
             "entidad_sitio_web": None, "distancia": distancia}
 
 
+class _FakeConn:
+    def commit(self):
+        pass
+
+
 @contextmanager
 def _conn_fake():
-    yield None
+    yield _FakeConn()
 
 
 def _preparar(monkeypatch, hits):
@@ -143,3 +148,29 @@ def test_respuesta_forzada_pasa_alternativas_al_prompt(monkeypatch):
     list(procesar_mensaje(deps, cid, "papel"))          # aclaración
     list(procesar_mensaje(deps, cid, "sigo sin saber"))  # forzada
     assert "B" in capturado["system"] and "C" in capturado["system"]
+
+
+def test_registra_consulta_en_caso_claro(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CEDULA", 0.2), _hit(2, "PASAPORTE", 0.4)])
+    registros = []
+    monkeypatch.setattr(pipeline, "registrar_consulta", lambda conn, datos: registros.append(datos))
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    list(procesar_mensaje(deps, cid, "quiero sacar mi carnet"))
+    assert len(registros) == 1
+    assert registros[0]["veredicto"] == "claro"
+    assert registros[0]["respuesta_tipo"] == "answer"
+    assert registros[0]["top_ids"] == [1, 2]
+
+
+def test_log_roto_no_rompe_la_respuesta(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CEDULA", 0.2), _hit(2, "PASAPORTE", 0.4)])
+
+    def explota(conn, datos):
+        raise RuntimeError("log caído")
+
+    monkeypatch.setattr(pipeline, "registrar_consulta", explota)
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos = list(procesar_mensaje(deps, cid, "quiero sacar mi carnet"))
+    assert eventos[-1] == ("answer", {"done": True, "tramite_ids": [1]})

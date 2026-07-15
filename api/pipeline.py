@@ -6,7 +6,7 @@ from api.confidence import evaluar_confianza
 from api.conversations import ConversationStore
 from api.prompts import SISTEMA_ACLARACION, SISTEMA_FILTROS, schema_filtros, system_de_sintesis, usuario_aclaracion
 from db.connection import get_connection
-from db.queries import buscar_entidad_slug, buscar_tramites
+from db.queries import buscar_entidad_slug, buscar_tramites, registrar_consulta
 from providers.base import ChatProvider, EmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,31 @@ def formular_aclaracion(deps: Deps, consulta: str, candidatos: list[dict]) -> st
     )
 
 
+def _registrar(conversation_id: str, mensaje: str, consulta: str, filtros: dict,
+               hits: list[dict], veredicto: str | None, respuesta_tipo: str) -> None:
+    """Fail-soft: el log nunca rompe la respuesta."""
+    try:
+        with get_connection() as conn:
+            registrar_consulta(conn, {
+                "conversation_id": conversation_id,
+                "mensaje": mensaje,
+                "consulta_acumulada": consulta,
+                "filtros": filtros or None,
+                "top_ids": [h["id"] for h in hits],
+                "top_distancias": [round(h["distancia"], 4) for h in hits],
+                "veredicto": veredicto,
+                "respuesta_tipo": respuesta_tipo,
+            })
+            conn.commit()
+    except Exception:
+        logger.warning("no se pudo registrar la consulta en consultas_log", exc_info=True)
+
+
 def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator[tuple[str, dict]]:
+    consulta = mensaje
+    filtros: dict = {}
+    hits: list[dict] = []
+    veredicto: str | None = None
     try:
         deps.store.append(conversation_id, "user", mensaje)
         consulta = deps.store.texto_de_consulta(conversation_id)
@@ -93,6 +117,7 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
         if veredicto in ("vacio", "lejano"):
             fetch_live_fallback(consulta)
             deps.store.append(conversation_id, "assistant", MENSAJE_NO_ENCONTRADO, tipo="not_found")
+            _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "not_found")
             yield ("answer", {"delta": MENSAJE_NO_ENCONTRADO})
             yield ("answer", {"done": True, "tramite_ids": []})
             return
@@ -100,6 +125,7 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
         if veredicto == "ambiguo" and deps.store.contar_aclaraciones(conversation_id) == 0:
             pregunta = formular_aclaracion(deps, consulta, hits[:3])
             deps.store.append(conversation_id, "assistant", pregunta, tipo="clarification")
+            _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "clarification")
             yield ("clarification", {"text": pregunta})
             return
 
@@ -120,7 +146,9 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
             partes.append(delta)
             yield ("answer", {"delta": delta})
         deps.store.append(conversation_id, "assistant", "".join(partes), tipo="answer")
+        _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "answer")
         yield ("answer", {"done": True, "tramite_ids": [top["id"]]})
     except Exception:
         logger.exception("error procesando mensaje en conversación %s", conversation_id)
+        _registrar(conversation_id, mensaje, consulta, filtros, hits, veredicto, "error")
         yield ("error", {"message": MENSAJE_ERROR})
