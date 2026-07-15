@@ -70,3 +70,11 @@ CREATE TABLE IF NOT EXISTS consultas_log (
   veredicto text,
   respuesta_tipo text
 );
+
+ALTER TABLE tramites ADD COLUMN IF NOT EXISTS activo boolean NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS sync_state (
+  id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  last_sync date,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

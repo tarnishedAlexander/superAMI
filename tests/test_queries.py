@@ -97,3 +97,33 @@ def test_registrar_consulta(conn):
     assert fila == ("claro", "answer", [1, 2])
     conn.execute("DELETE FROM consultas_log WHERE conversation_id = 'test-log-1'")
     conn.commit()
+
+
+def test_inactivos_fuera_del_retrieval(conn):
+    from db.queries import marcar_activos, marcar_inactivos
+
+    guardar_tramite_completo(conn, _fila(900005, "TRAMITE DADO DE BAJA"), _vec(1.0))
+    conn.commit()
+    marcar_inactivos(conn, [900005])
+    conn.commit()
+    hits = [h for h in buscar_tramites(conn, _vec(1.0), limit=5000) if h["id"] == 900005]
+    assert hits == []
+    marcar_activos(conn, [900005])
+    conn.commit()
+    hits = [h for h in buscar_tramites(conn, _vec(1.0), limit=5000) if h["id"] == 900005]
+    assert len(hits) == 1
+
+
+def test_estado_tramites_y_sync_state(conn):
+    from db.queries import guardar_sync_state, leer_estado_tramites
+
+    guardar_tramite_completo(conn, _fila(900006, "PARA ESTADO"), _vec(0.5))
+    conn.commit()
+    estado = leer_estado_tramites(conn)
+    assert estado[900006]["activo"] is True
+    assert "last_updated" in estado[900006]
+
+    guardar_sync_state(conn)
+    conn.commit()
+    fila = conn.execute("SELECT last_sync FROM sync_state WHERE id = 1").fetchone()
+    assert fila[0] is not None

@@ -126,6 +126,7 @@ SELECT t.id, t.nombre, t.slug, t.descripcion, t.resultado, t.marco_legal,
 FROM tramites t
 LEFT JOIN entidades e ON e.id = t.entidad_id
 WHERE t.embedding IS NOT NULL
+  AND t.activo
   AND (%(cat)s::text IS NULL OR EXISTS (
         SELECT 1 FROM tramites_categorias tc JOIN categorias c ON c.id = tc.categoria_id
         WHERE tc.tramite_id = t.id AND c.slug = %(cat)s))
@@ -176,4 +177,26 @@ def registrar_consulta(conn, datos: dict) -> None:
                 %(top_ids)s, %(top_distancias)s, %(veredicto)s, %(respuesta_tipo)s)
         """,
         {**datos, "filtros": Json(datos["filtros"]) if datos.get("filtros") else None},
+    )
+
+
+def leer_estado_tramites(conn) -> dict[int, dict]:
+    filas = conn.execute("SELECT id, last_updated, activo FROM tramites").fetchall()
+    return {f[0]: {"last_updated": f[1], "activo": f[2]} for f in filas}
+
+
+def marcar_inactivos(conn, ids) -> None:
+    conn.execute("UPDATE tramites SET activo = false WHERE id = ANY(%s)", (list(ids),))
+
+
+def marcar_activos(conn, ids) -> None:
+    conn.execute("UPDATE tramites SET activo = true WHERE id = ANY(%s)", (list(ids),))
+
+
+def guardar_sync_state(conn) -> None:
+    conn.execute(
+        """
+        INSERT INTO sync_state (id, last_sync, updated_at) VALUES (1, CURRENT_DATE, now())
+        ON CONFLICT (id) DO UPDATE SET last_sync = EXCLUDED.last_sync, updated_at = now()
+        """
     )

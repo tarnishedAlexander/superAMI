@@ -202,3 +202,29 @@ req/min: embeddings en lotes de 32 con reintentos.
 calidad de síntesis (`PROVIDER=anthropic`) — la síntesis es el paso con
 la barra de calidad más alta del spec; y considerar modelos NIM más
 nuevos (deepseek-v4, qwen3.5, nemotron) para el rol potente.
+
+## Sync incremental: diff por fechaActualización (2026-07-14+)
+
+**Columnas reales observadas** (inspección directa de los CSVs de
+`tramites-bo`, 2026-07-15):
+
+- `adiciones.csv`: `timestamp, tipo, id, entidad, nombre` — `tipo` es
+  `aparece` o `desaparece`.
+- `modificaciones.csv`: `timestamp, id, entidad, nombre, campo, viejo,
+  nuevo` — un registro por cada campo individual que cambió (formato
+  diff de campo, no de registro completo).
+
+**Decisión:** el sync incremental (`ingest/sync.py`) implementa el diff
+comparando `fechaActualización` de cada registro del `tramites.jsonl`
+contra `last_updated` guardado en la tabla `tramites`, en vez de parsear
+estos CSVs. Motivo: esta comparación cubre altas, modificaciones y bajas
+en un solo mecanismo (un registro nuevo o con fecha posterior entra al
+diff; uno que desaparece del jsonl se marca inactivo), sin depender del
+formato específico de columnas de terceros — el spec ya sanciona esta
+equivalencia como fallback válido.
+
+**Si `fechaActualización` demostrara ser poco confiable** (ej. el
+dataset no la actualiza consistentemente), estos CSVs quedan como
+alternativa ya documentada — `adiciones.csv` identificaría altas/bajas
+por `tipo`, y `modificaciones.csv` requeriría agrupar por `id` ya que
+reporta cambios campo por campo, no por registro.
