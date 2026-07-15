@@ -12,13 +12,23 @@ class ConversationStore:
         self._historiales.setdefault(cid, [])
         return cid
 
-    def append(self, conversation_id: str, role: str, content: str) -> None:
-        self._historiales[conversation_id].append({"role": role, "content": content})
+    def append(self, conversation_id: str, role: str, content: str, tipo: str | None = None) -> None:
+        self._historiales[conversation_id].append(
+            {"role": role, "content": content, "tipo": tipo or role}
+        )
 
     def mensajes(self, conversation_id: str) -> list[dict]:
-        return list(self._historiales.get(conversation_id, []))
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in self._historiales.get(conversation_id, [])
+        ]
 
     def texto_de_consulta(self, conversation_id: str) -> str:
         return " ".join(
             m["content"] for m in self._historiales.get(conversation_id, []) if m["role"] == "user"
+        )
+
+    def contar_aclaraciones(self, conversation_id: str) -> int:
+        return sum(
+            1 for m in self._historiales.get(conversation_id, []) if m.get("tipo") == "clarification"
         )

@@ -15,12 +15,18 @@ def evaluar_confianza(
     distancias: list[float],
     umbral_gap: float = UMBRAL_GAP,
     umbral_distancia_max: float = UMBRAL_DISTANCIA_MAX,
-) -> Literal["claro", "ambiguo", "vacio"]:
-    """Gate determinista sobre las distancias coseno del retrieval (ascendentes)."""
+) -> Literal["claro", "ambiguo", "vacio", "lejano"]:
+    """Gate determinista sobre las distancias coseno del retrieval (ascendentes).
+
+    - "lejano": el mejor match está más allá de umbral_distancia_max — el trámite
+      probablemente no está en la DB; preguntar no lo va a hacer aparecer.
+    - "ambiguo": gap chico entre top-1 y top-2 con d1 razonable — ambigüedad
+      genuina entre candidatos, corresponde aclarar.
+    """
     if not distancias:
         return "vacio"
     if distancias[0] > umbral_distancia_max:
-        return "ambiguo"
+        return "lejano"
     if len(distancias) == 1:
         return "claro"
     if distancias[1] - distancias[0] >= umbral_gap:
