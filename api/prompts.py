@@ -75,3 +75,47 @@ def system_de_sintesis_en_vivo(datos_vivos: dict) -> str:
         partes.append("\n<costo_extraido>\n" + json.dumps(datos_vivos["costo"], ensure_ascii=False) + "\n</costo_extraido>")
     partes.append("\n<pagina>\n" + datos_vivos["texto"] + "\n</pagina>")
     return "".join(partes)
+
+
+SISTEMA_RELACIONES = """Sos un experto en trámites del Estado boliviano. Dado un trámite BASE y una lista de trámites CANDIDATOS, clasificá la relación procedimental de cada candidato respecto al base:
+- siguiente_paso: el ciudadano típicamente hace el candidato DESPUÉS del base.
+- requisito_previo: el candidato se necesita ANTES de poder hacer el base.
+- alternativa: resuelven la misma necesidad por vías distintas.
+- mismo_evento: pertenecen al mismo momento de vida pero sin orden entre sí.
+- ninguna: sin relación procedimental útil (similitud solo temática o superficial).
+Basate únicamente en los nombres y descripciones. Ante la duda, "ninguna"."""
+
+
+def schema_relaciones(ids: list[int]) -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "relaciones": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer", "enum": ids},
+                        "tipo": {
+                            "type": "string",
+                            "enum": ["siguiente_paso", "requisito_previo", "alternativa", "mismo_evento", "ninguna"],
+                        },
+                    },
+                    "required": ["id", "tipo"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["relaciones"],
+        "additionalProperties": False,
+    }
+
+
+def _resumen(tramite: dict) -> str:
+    descripcion = (tramite.get("descripcion") or "")[:300]
+    return f"{tramite['nombre']} — {descripcion}"
+
+
+def usuario_relaciones(base: dict, candidatos: list[dict]) -> str:
+    lineas = [f"[{c['id']}] {_resumen(c)}" for c in candidatos]
+    return "BASE:\n" + _resumen(base) + "\n\nCANDIDATOS:\n" + "\n".join(lineas)

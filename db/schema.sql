@@ -91,3 +91,10 @@ CREATE TABLE IF NOT EXISTS conversaciones (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS tramites_relacionados (
+  tramite_id integer REFERENCES tramites(id) ON DELETE CASCADE,
+  related_tramite_id integer REFERENCES tramites(id) ON DELETE CASCADE,
+  tipo_relacion text NOT NULL CHECK (tipo_relacion IN ('siguiente_paso', 'requisito_previo', 'alternativa', 'mismo_evento')),
+  PRIMARY KEY (tramite_id, related_tramite_id)
+);

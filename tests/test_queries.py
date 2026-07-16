@@ -140,3 +140,23 @@ def test_fetch_cache_roundtrip_y_ttl(conn):
     assert leer_fetch_cache(conn, "https://test.gob.bo/t", ttl_dias=7) is None
     conn.execute("DELETE FROM fetch_cache WHERE url = 'https://test.gob.bo/t'")
     conn.commit()
+
+
+def test_candidatos_y_relaciones(conn):
+    from db.queries import candidatos_relacionados, guardar_relaciones, listar_relacionados
+
+    # misma entidad (segip-test) => candidatos entre sí
+    guardar_tramite_completo(conn, _fila(900010, "TRAMITE BASE"), _vec(1.0))
+    guardar_tramite_completo(conn, _fila(900011, "TRAMITE VECINO"), _vec(0.9))
+    conn.commit()
+
+    candidatos = candidatos_relacionados(conn, 900010, limit=5)
+    assert any(c["id"] == 900011 for c in candidatos)
+
+    guardar_relaciones(conn, 900010, [
+        {"id": 900011, "tipo": "siguiente_paso"},
+        {"id": 900011, "tipo": "ninguna"},  # ninguna no se persiste (y el PK evita duplicar)
+    ])
+    conn.commit()
+    relacionados = listar_relacionados(conn, 900010)
+    assert relacionados == [{"tipo": "siguiente_paso", "nombre": "TRAMITE VECINO", "entidad_nombre": "SEGIP TEST"}]

@@ -218,3 +218,58 @@ def guardar_fetch_cache(conn, url: str, datos: dict) -> None:
         """,
         (url, Json(datos)),
     )
+
+
+def candidatos_relacionados(conn, tramite_id: int, limit: int = 5) -> list[dict]:
+    """Candidatos baratos: misma entidad o evento de vida compartido, por cercanía de embedding."""
+    filas = conn.execute(
+        """
+        SELECT t.id, t.nombre, t.descripcion, e.nombre AS entidad_nombre,
+               t.embedding <=> b.embedding AS distancia
+        FROM tramites b
+        JOIN tramites t ON t.id <> b.id AND t.embedding IS NOT NULL AND t.activo
+        LEFT JOIN entidades e ON e.id = t.entidad_id
+        WHERE b.id = %(id)s AND b.embedding IS NOT NULL
+          AND (t.entidad_id = b.entidad_id
+               OR EXISTS (
+                    SELECT 1 FROM tramites_eventos te1
+                    JOIN tramites_eventos te2 ON te2.evento_id = te1.evento_id
+                    WHERE te1.tramite_id = b.id AND te2.tramite_id = t.id))
+        ORDER BY t.embedding <=> b.embedding
+        LIMIT %(limit)s
+        """,
+        {"id": tramite_id, "limit": limit},
+    ).fetchall()
+    return [
+        {"id": f[0], "nombre": f[1], "descripcion": f[2], "entidad_nombre": f[3], "distancia": float(f[4])}
+        for f in filas
+    ]
+
+
+def guardar_relaciones(conn, tramite_id: int, relaciones: list[dict]) -> None:
+    conn.execute("DELETE FROM tramites_relacionados WHERE tramite_id = %s", (tramite_id,))
+    for relacion in relaciones:
+        if relacion["tipo"] == "ninguna":
+            continue
+        conn.execute(
+            """
+            INSERT INTO tramites_relacionados (tramite_id, related_tramite_id, tipo_relacion)
+            VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+            """,
+            (tramite_id, relacion["id"], relacion["tipo"]),
+        )
+
+
+def listar_relacionados(conn, tramite_id: int, limit: int = 3) -> list[dict]:
+    filas = conn.execute(
+        """
+        SELECT tr.tipo_relacion, t.nombre, e.nombre
+        FROM tramites_relacionados tr
+        JOIN tramites t ON t.id = tr.related_tramite_id AND t.activo
+        LEFT JOIN entidades e ON e.id = t.entidad_id
+        WHERE tr.tramite_id = %s
+        LIMIT %s
+        """,
+        (tramite_id, limit),
+    ).fetchall()
+    return [{"tipo": f[0], "nombre": f[1], "entidad_nombre": f[2]} for f in filas]
