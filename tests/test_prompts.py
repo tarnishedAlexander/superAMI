@@ -12,3 +12,12 @@ def test_sintesis_instruye_que_hacer_con_datos_ausentes():
 
 def test_sintesis_incluye_el_tramite():
     assert '"nombre": "TRAMITE X"' in system_de_sintesis(_tramite())
+
+
+def test_sintesis_incluye_relacionados():
+    system = system_de_sintesis(
+        _tramite(),
+        relacionados=[{"tipo": "siguiente_paso", "nombre": "TRAMITE Y", "entidad_nombre": "ENT"}],
+    )
+    assert "TRAMITE Y" in system
+    assert "siguiente_paso" in system

@@ -196,3 +196,35 @@ def test_lejano_sin_fetch_vivo_cae_a_no_encontrado(monkeypatch):
     cid = deps.store.get_or_create(None)
     eventos = list(procesar_mensaje(deps, cid, "algo raro"))
     assert "No encontré" in eventos[0][1]["delta"]
+
+
+def test_respuesta_clara_incluye_relacionados_en_prompt(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CEDULA", 0.2), _hit(2, "OTRO", 0.5)])
+    monkeypatch.setattr(
+        pipeline, "listar_relacionados",
+        lambda conn, tid, limit=3: [{"tipo": "siguiente_paso", "nombre": "PASO SIGUIENTE", "entidad_nombre": None}],
+    )
+    capturado = {}
+
+    class ChatEspia(FakeChat):
+        def stream(self, *, system, messages, max_tokens=4096):
+            capturado["system"] = system
+            yield "ok"
+
+    deps = _deps(potente=ChatEspia())
+    cid = deps.store.get_or_create(None)
+    list(procesar_mensaje(deps, cid, "carnet"))
+    assert "PASO SIGUIENTE" in capturado["system"]
+
+
+def test_relacionados_roto_no_rompe_respuesta(monkeypatch):
+    _preparar(monkeypatch, [_hit(1, "CEDULA", 0.2), _hit(2, "OTRO", 0.5)])
+
+    def explota(conn, tid, limit=3):
+        raise RuntimeError("tabla caída")
+
+    monkeypatch.setattr(pipeline, "listar_relacionados", explota)
+    deps = _deps()
+    cid = deps.store.get_or_create(None)
+    eventos = list(procesar_mensaje(deps, cid, "carnet"))
+    assert eventos[-1] == ("answer", {"done": True, "tramite_ids": [1]})

@@ -14,7 +14,7 @@ from api.prompts import (
     usuario_aclaracion,
 )
 from db.connection import get_connection
-from db.queries import buscar_entidad_slug, buscar_tramites, registrar_consulta
+from db.queries import buscar_entidad_slug, buscar_tramites, listar_relacionados, registrar_consulta
 from providers.base import ChatProvider, EmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -152,9 +152,15 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
             if forzado
             else None
         )
+        relacionados: list[dict] = []
+        try:
+            with get_connection() as conn:
+                relacionados = listar_relacionados(conn, top["id"])
+        except Exception:
+            logger.warning("no se pudieron leer relacionados de %s", top["id"], exc_info=True)
         partes: list[str] = []
         for delta in deps.chat_potente.stream(
-            system=system_de_sintesis(top, alternativas=alternativas),
+            system=system_de_sintesis(top, alternativas=alternativas, relacionados=relacionados or None),
             messages=deps.store.mensajes(conversation_id),
             max_tokens=4096,
         ):

@@ -44,7 +44,11 @@ Reglas estrictas:
 - Formato: texto corrido con listas cortas si ayudan. Sin encabezados grandes."""
 
 
-def system_de_sintesis(tramite: dict, alternativas: list[dict] | None = None) -> str:
+def system_de_sintesis(
+    tramite: dict,
+    alternativas: list[dict] | None = None,
+    relacionados: list[dict] | None = None,
+) -> str:
     datos = {k: v for k, v in tramite.items() if k != "distancia"}
     base = SISTEMA_SINTESIS + "\n\n<tramite>\n" + json.dumps(datos, ensure_ascii=False, default=str) + "\n</tramite>"
     if alternativas:
@@ -55,6 +59,16 @@ def system_de_sintesis(tramite: dict, alternativas: list[dict] | None = None) ->
             "\n\nAtención: la coincidencia con la consulta NO es segura. Abrí la respuesta aclarando qué "
             'trámite estás mostrando (ej. "Te muestro el que mejor coincide con tu consulta: ...") y cerrá '
             "mencionando en una línea estas alternativas por si buscaba otra cosa:\n" + lineas
+        )
+    if relacionados:
+        lineas = "\n".join(
+            f"- ({r['tipo']}) {r['nombre']}" + (f" — {r['entidad_nombre']}" if r.get("entidad_nombre") else "")
+            for r in relacionados
+        )
+        base += (
+            "\n\nTrámites relacionados (si alguno es pertinente a la consulta, mencionalo en UNA línea al final "
+            "como anticipación — ej. \"después de esto probablemente necesites...\"; no inventes detalles de ellos):\n"
+            + lineas
         )
     return base
 
