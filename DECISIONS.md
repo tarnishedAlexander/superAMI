@@ -228,3 +228,36 @@ dataset no la actualiza consistentemente), estos CSVs quedan como
 alternativa ya documentada — `adiciones.csv` identificaría altas/bajas
 por `tipo`, y `modificaciones.csv` requeriría agrupar por `id` ya que
 reporta cambios campo por campo, no por registro.
+
+## Eval comparativo de embeddings: NVIDIA bge-m3 vs. sentence-transformers e5-base (2026-07-16)
+
+Corrida de `tests/eval_comparativo.py --embeddings` sobre el corpus
+completo (1,739 trámites) y el eval de 97 casos (Task 6/7), calculando
+distancias localmente (sin tocar la DB, dims distintas: 1024 vs 768):
+
+| backend | hit@1 (directas) | hit@5 (directas) | aclara ok (ambiguas) | gateadas (no satisfacibles) | claro incorrecto |
+|---|---|---|---|---|---|
+| nvidia/bge-m3 | 36/77 | 64/77 | 5/8 | 2/12 | 12 |
+| st/multilingual-e5-base | 28/77 | 54/77 | 8/8 | 0/12 | 1 |
+
+**Lectura:** bge-m3 recupera correctamente más seguido en términos
+absolutos (mejor hit@1/hit@5), pero con los umbrales del gate
+calibrados para bge-m3 (que no aplican 1:1 a e5-base — la nota del
+script lo marca como "indicativo") comete muchas más respuestas
+"claro" incorrectas (12 vs 1) y gatea peor las no-satisfacibles (2/12
+vs 0/12) y las ambiguas (5/8 vs 8/8 aclaradas). e5-base es más
+"conservador" — falla más en encontrar el trámite correcto pero cuando
+dice "claro" casi siempre acierta.
+
+**Decisión:** ninguna todavía — la migración de embeddings queda
+pendiente de evaluación posterior al MVP, tal como indica el plan. Este
+resultado es un insumo para esa decisión futura, no un cambio de
+proveedor por defecto (`PROVIDER=nvidia` sigue siendo el default sin
+alteraciones).
+
+**Comparación de síntesis (NIM vs Ollama): no disponible.** Se verificó
+en esta máquina (2026-07-16) que Ollama no está instalado (sin binario
+`ollama`, sin proceso escuchando en `localhost:11434`). El script
+`tests/eval_comparativo.py --sintesis N` queda listo para correrse
+cuando haya un entorno con Ollama disponible — no bloquea el MVP, tal
+como contempla el plan.

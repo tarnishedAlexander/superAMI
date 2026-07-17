@@ -156,3 +156,15 @@ def test_openai_embed_query_usa_input_type_query():
     provider = OpenAICompatEmbeddingProvider(model="baai/bge-m3", base_url="http://x", api_key="k", client=cliente)
     assert provider.embed_query("carnet") == [0.5, 0.6]
     assert cliente.embeddings.llamadas[0]["extra_body"]["input_type"] == "query"
+
+
+def test_factory_ollama_usa_openai_compat(monkeypatch):
+    from providers import factory
+
+    monkeypatch.setenv("PROVIDER", "ollama")
+    monkeypatch.delenv("MODELO_POTENTE", raising=False)
+    monkeypatch.delenv("MODELO_ECONOMICO", raising=False)
+    potente = factory.chat_potente()
+    economico = factory.chat_economico()
+    assert potente.model == "llama3.1:8b"
+    assert economico.model == "llama3.1:8b"
