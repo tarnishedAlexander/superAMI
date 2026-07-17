@@ -67,3 +67,32 @@ curl -N -X POST localhost:8000/chat -H 'content-type: application/json' \
 .venv/bin/pytest                                # unit + integración (necesita docker)
 .venv/bin/python tests/eval_retrieval.py        # eval de retrieval con frases reales
 ```
+
+## Sync semanal
+
+El dataset se actualiza los domingos. Correr:
+
+    venv/Scripts/python.exe -m ingest.sync --dry-run   # ver qué cambiaría
+    venv/Scripts/python.exe -m ingest.sync             # aplicar
+
+Idempotente: solo procesa registros nuevos/modificados (diff por fechaActualización)
+y marca bajas como `activo=false`. Agendable con cron / Programador de tareas de Windows.
+
+## Calibración del gate
+
+    venv/Scripts/python.exe tests/verificar_eval.py    # etiquetas del eval vs DB
+    venv/Scripts/python.exe tests/eval_retrieval.py    # corrida informativa
+    venv/Scripts/python.exe tests/calibrar_gate.py     # barrido de umbrales
+
+Tras una sesión con usuarios, las frases quedan en `consultas_log`; incorporarlas
+al eval (`tests/eval_dataset.py`) y re-correr el barrido.
+
+## Providers open-source (opcional)
+
+    venv/Scripts/python.exe -m pip install -r requirements-oss.txt
+    # en .env: PROVIDER=ollama (ver .env.example)
+
+NIM sigue siendo el default. Comparar calidad antes de migrar:
+
+    venv/Scripts/python.exe tests/eval_comparativo.py --embeddings
+    venv/Scripts/python.exe tests/eval_comparativo.py --sintesis 5

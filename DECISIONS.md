@@ -261,3 +261,59 @@ en esta máquina (2026-07-16) que Ollama no está instalado (sin binario
 `tests/eval_comparativo.py --sintesis N` queda listo para correrse
 cuando haya un entorno con Ollama disponible — no bloquea el MVP, tal
 como contempla el plan.
+
+## Verificación final del MVP backend (Task 18, 2026-07-16)
+
+Corrida de `pytest` (81/81 verde), `tests/eval_retrieval.py` y
+`tests/calibrar_gate.py` contra el estado actual de la DB (1,739
+trámites, dataset sin cambios desde la calibración de la Task 7).
+Resultado real contra los 4 criterios de éxito del spec — **reportado
+tal cual, sin maquillar, según indica el plan**:
+
+- **hit@5 >= 90% en directas**: NO se cumple. Real: 63/77 (≈81.8%).
+- **cero "claro" incorrecto**: NO se cumple. Con los umbrales actuales
+  (`gap=0.03`, `dist=0.52`): `claro_incorrecto=12`.
+- **<= 25% de directas en aclaración innecesaria**: NO se cumple con
+  los umbrales actuales (`one_shot=13/77`, el resto entre aclaración y
+  claro incorrecto).
+- **100% de no satisfacibles sin inventar datos**: parcialmente. En la
+  prueba E2E manual (abajo), las no-satisfacibles no gatearon como
+  "lejano" sino como "ambiguo" y el sistema pidió aclaración en vez de
+  responder "no encontrado" — no inventó datos en el primer turno, pero
+  si el usuario contesta la aclaración, el tope de 1 ronda fuerza una
+  respuesta sobre el candidato más cercano (que sería incorrecto para
+  una consulta no satisfacible). Riesgo real, no verificado a fondo en
+  esta sesión.
+
+**Causa raíz, ya documentada en la sección "Task 7" de este archivo**:
+con el dataset completo no existe una combinación de `gap`/`dist_max`
+que logre `claro_incorrecto=0` sin anular casi todas las respuestas
+directas (0-1/77 one-shot) — es un límite de calidad de retrieval del
+corpus (casi-duplicados), no un problema de calibración fina. Decisión
+tomada en su momento: no comprometer el gate para compensar un
+problema de retrieval. **Esto queda pendiente de la sesión con
+usuarios reales** (ver `docs/guia-sesion-usuarios.md`) y de una
+eventual mejora de retrieval/deduplicación — explícitamente fuera de
+alcance de este cierre de MVP.
+
+**Prueba E2E manual** (server real, `POST /chat`):
+- Directa ("cobrar la renta dignidad"): el gate dio "ambiguo" (no
+  "claro") — pidió aclaración en vez de responder directo. Consistente
+  con el hallazgo de calibración de arriba, no un bug nuevo.
+- Ambigua ("necesito un certificado"): pidió aclaración correctamente
+  ("¿Se trata de un certificado relacionado con estudios o
+  educación?").
+- No satisfacible ("sacar pasaporte"): pidió aclaración en vez de
+  responder "no encontrado" (ver riesgo arriba) — el gate la clasificó
+  "ambiguo", no "lejano", porque su distancia (0.497) queda por debajo
+  del umbral `dist_max=0.52`.
+
+**Conclusión**: el MVP backend está funcionalmente completo (las 18
+tasks del plan implementadas, testeadas y con datos reales cargados),
+pero el gate de confianza **no cumple hoy los 4 criterios de éxito del
+spec** con este dataset. Esto no es un defecto de implementación de
+ninguna task — es un hallazgo de calidad de datos/retrieval detectado
+y decidido deliberadamente no enmascarar, para que la sesión con
+usuarios reales (Task 18, guía ya creada) tenga el diagnóstico correcto
+para decidir los próximos pasos (recalibración, deduplicación de
+trámites casi-idénticos, o mejora del texto embebido).

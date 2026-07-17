@@ -10,41 +10,43 @@ real".
 ## Fase 2 — MVP completo
 
 Implementar el resto del spec original de `CLAUDE.md` tal cual está
-descrito:
+descrito. Estado tras el plan de implementación
+(`docs/superpowers/plans/2026-07-14-mvp-backend.md` /
+`docs/superpowers/specs/2026-07-14-mvp-backend-design.md`), Tasks 1-18:
 
-- **Sync + diff real**: leer `adiciones.csv` y `modificaciones.csv` del
-  repo `tramites-bo` y solo upsertear los registros nuevos/modificados,
-  en vez de la carga completa única del demo. Correr semanalmente (el
-  dataset se actualiza los domingos).
-- **Fetch en vivo real** (paso online 4): cuando el retrieval no
-  encuentra nada, traer la página externa vía el campo `enlaces` del
-  registro más cercano y extraer con el mismo modelo potente y mismo
-  esquema de salida que el paso offline 3. Hoy es un stub que responde
-  "no encontrado".
-- **`tramites_relacionados`**: no hay fuente directa en el dataset. Una
-  aproximación posible es agrupar por `eventosVida` compartido, pero
-  hay que validar si eso realmente captura adyacencia procedimental
-  (siguiente_paso / requisito_previo / alternativa) o solo similitud
-  temática.
-- **Calibración rigurosa de los umbrales del gate de confianza**: el
-  demo arranca con valores de partida sin validar contra un set grande;
-  expandir `tests/eval_retrieval.py` con muchas más frases reales
-  (idealmente logs de uso real) y ajustar `gap`/distancia absoluta con
-  eso.
-- **Persistencia real de conversación**: hoy es un dict in-memory que
-  se pierde al reiniciar el server. Mover a Redis o a una tabla de
-  Postgres si el loop de aclaración necesita sobrevivir reinicios o
-  escalar a más de un proceso.
-- **Proveedores open-source implementados**: la interfaz
-  `ChatProvider`/`EmbeddingProvider` ya está pensada para esto (ver
-  `DECISIONS.md` punto 5). Falta la implementación concreta —
-  candidatos: Ollama (llama3.1, qwen2.5) para el modelo económico,
-  sentence-transformers multilingüe (ej. `intfloat/multilingual-e5-base`)
-  para embeddings. Evaluar calidad de retrieval y de síntesis antes de
-  migrar el modelo potente.
-- **Frontend en TypeScript**: consumir el streaming SSE de `/chat`.
-  Puede implicar reestructurar el repo a monorepo (`backend/` +
-  `frontend/`) — no se diseñó el backend actual para eso todavía.
+- **Sync + diff real**: ✔ implementado — `ingest/sync.py` (Task 9),
+  diff por `fechaActualización` vs `last_updated`, con `--dry-run` y
+  marcado de bajas (`activo=false`). Ver `DECISIONS.md` para el porqué
+  de comparar por fecha en vez de parsear los CSVs de terceros.
+- **Fetch en vivo real** (paso online 4): ✔ implementado —
+  `api/live_fetch.py` (Task 10-11), con caché de 7 días
+  (`fetch_cache`) y fail-soft total. Reemplaza el stub del demo.
+- **`tramites_relacionados`**: ✔ implementado — `ingest/relacionados.py`
+  (Task 13-15), clasificación con el modelo potente sobre candidatos
+  por misma entidad/evento, validada a mano con muestra e integrada en
+  la síntesis final. Corrida batch completa sobre los 1,739 trámites.
+- **Calibración rigurosa de los umbrales del gate de confianza**: ✔
+  proceso implementado — eval ampliado a 97 casos (Task 6) y script de
+  barrido `tests/calibrar_gate.py` (Task 7). **Hallazgo**: con el
+  dataset completo no existe una combinación de umbrales que cumpla los
+  4 criterios de éxito del spec sin anular las respuestas directas
+  (ver `DECISIONS.md`, secciones "Task 7" y "Verificación final del MVP
+  backend") — decisión deliberada de no comprometer el gate para
+  compensar un problema de calidad de retrieval/dataset. Pendiente de
+  la sesión con usuarios reales (`docs/guia-sesion-usuarios.md`).
+- **Persistencia real de conversación**: ✔ implementado —
+  `PostgresConversationStore` (Task 12), tabla `conversaciones`, con
+  limpieza best-effort de conversaciones >24h.
+- **Proveedores open-source implementados**: ✔ implementado —
+  `PROVIDER=ollama` + `SentenceTransformersEmbeddingProvider` (Task 16).
+  La **migración** de embeddings quedó **evaluada pero no ejecutada**:
+  eval comparativo corrido (Task 17, resultado en `DECISIONS.md`),
+  `PROVIDER=nvidia` sigue siendo el default sin alteraciones — la
+  decisión de migrar se difiere a después del MVP.
+- **Frontend en TypeScript**: sigue **pendiente**. Consumir el
+  streaming SSE de `/chat`. Puede implicar reestructurar el repo a
+  monorepo (`backend/` + `frontend/`) — no se diseñó el backend actual
+  para eso todavía.
 
 ## Fase 3 — Base de producto real
 
