@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import time
 from typing import Iterator
@@ -30,7 +31,9 @@ class OpenAICompatChatProvider:
 
     def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None):
         self.model = model
-        self._client = client or OpenAI(base_url=base_url, api_key=api_key)
+        # timeout explícito: sin él, un request colgado del free tier de NIM
+        # bloquea hasta 600s por intento (corridas batch de horas se vuelven días)
+        self._client = client or OpenAI(base_url=base_url, api_key=api_key, timeout=60.0, max_retries=3)
 
     def _mensajes(self, system: str, messages: list[dict]) -> list[dict]:
         return [{"role": "system", "content": system}, *messages]
@@ -45,17 +48,21 @@ class OpenAICompatChatProvider:
         """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
         try:
             datos = None
-            try:
-                # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
-                respuesta = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=self._mensajes(system, messages),
-                    max_tokens=max_tokens,
-                    extra_body={"nvext": {"guided_json": schema}},
-                )
-                datos = _extraer_json(respuesta.choices[0].message.content or "")
-            except Exception:
-                pass
+            # SALTAR_GUIDED_JSON=1: para modelos que ignoran nvext.guided_json
+            # (p.ej. deepseek-v4-flash) el primer intento siempre falla y duplica
+            # el costo de cada llamada — ir directo al fallback de prompt
+            if os.environ.get("SALTAR_GUIDED_JSON") != "1":
+                try:
+                    # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
+                    respuesta = self._client.chat.completions.create(
+                        model=self.model,
+                        messages=self._mensajes(system, messages),
+                        max_tokens=max_tokens,
+                        extra_body={"nvext": {"guided_json": schema}},
+                    )
+                    datos = _extraer_json(respuesta.choices[0].message.content or "")
+                except Exception:
+                    pass
             if datos is None:
                 # algunos endpoints ignoran guided_json sin error y devuelven prosa
                 respuesta = self._client.chat.completions.create(
@@ -92,7 +99,9 @@ class OpenAICompatEmbeddingProvider:
 
     def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None):
         self.model = model
-        self._client = client or OpenAI(base_url=base_url, api_key=api_key)
+        # timeout explícito: sin él, un request colgado del free tier de NIM
+        # bloquea hasta 600s por intento (corridas batch de horas se vuelven días)
+        self._client = client or OpenAI(base_url=base_url, api_key=api_key, timeout=60.0, max_retries=3)
 
     def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
         respuesta = self._client.embeddings.create(

@@ -40,6 +40,7 @@ Reglas estrictas:
 - Si un dato que el ciudadano pide no está en <tramite>: decilo sin rodeos, resumí en una o dos líneas qué información SÍ tiene la ficha (requisitos, costo, dónde se hace), y si hay una URL en enlaces o modalidades indicá que ahí puede figurar el dato faltante. Nunca respondas solo "ese dato no figura".
 - Si el trámite es virtual y hay URL en modalidades o enlaces, incluila.
 - Si costo_es_gratuito es true, aclarar que es gratuito. Si hay costo_monto, dar monto y moneda (UFV = Unidad de Fomento a la Vivienda).
+- Si el trámite de <tramite> no corresponde al tema que el ciudadano pide (es otro asunto), no fuerces la respuesta: decilo sin rodeos y aclará que por ahora el asistente cubre impuestos, empresas y trámites municipales.
 - Respondé la pregunta puntual del ciudadano primero; después agregá lo esencial (requisitos, dónde/cómo, costo).
 - Formato: texto corrido con listas cortas si ayudan. Sin encabezados grandes."""
 
@@ -79,6 +80,7 @@ Reglas estrictas:
 - Usá ÚNICAMENTE la información de <pagina>. No inventes requisitos, costos, plazos ni oficinas.
 - Abrí la respuesta aclarando la fuente: que la información viene de la página oficial indicada en <url> y puede estar desactualizada.
 - Si la página no responde la pregunta puntual, decilo y sugerí visitar la URL.
+- Si el contenido de <pagina> no tiene relación con la consulta, no fuerces una respuesta: decí que el tema está fuera del alcance actual del asistente (impuestos, empresas y trámites municipales) y sugerí la URL solo si es pertinente.
 - Incluí la URL al final de la respuesta.
 - Respondé en español claro, breve y accionable."""
 

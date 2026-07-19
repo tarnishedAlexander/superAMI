@@ -28,6 +28,10 @@ docker compose up -d    # Postgres+pgvector en localhost:5433
 
 ## Cargar los datos (una vez, ~3-5 min)
 
+> ¿Recibiste `ami-YYYYMMDD.dump`? **No reproceses**: importá el dump
+> (embeddings + grafo de relaciones ya calculados) y saltá esta sección.
+> Ver **[COMPARTIR.md](COMPARTIR.md)** → `scripts/import_db.sh ami-YYYYMMDD.dump`.
+
 ```bash
 .venv/bin/python -m ingest.load
 ```

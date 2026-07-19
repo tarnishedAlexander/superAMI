@@ -7,6 +7,7 @@ Uso:
 """
 import argparse
 import logging
+import os
 import time
 
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ from providers import factory
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-PAUSA_SEGUNDOS = 1.6  # free tier NIM ~40 req/min
+PAUSA_SEGUNDOS = float(os.environ.get("PAUSA_SEGUNDOS", "1.6"))  # free tier NIM ~40 req/min
 TIPOS_VALIDOS = ("siguiente_paso", "requisito_previo", "alternativa", "mismo_evento", "ninguna")
 
 
@@ -68,14 +69,26 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--muestra", type=int, default=None, help="clasificar N trámites e imprimir, sin escribir")
     parser.add_argument("--desde", type=int, default=0, help="retomar desde este tramite_id")
+    parser.add_argument("--hasta", type=int, default=None, help="solo hasta este tramite_id inclusive (corridas en paralelo)")
+    parser.add_argument(
+        "--solo-sin-relaciones",
+        action="store_true",
+        help="solo trámites sin ninguna relación registrada (backfill de fallos fail-open; incluye ceros legítimos)",
+    )
     args = parser.parse_args()
 
+    hasta = args.hasta if args.hasta is not None else 2**31 - 1
+    filtro_extra = (
+        " AND NOT EXISTS (SELECT 1 FROM tramites_relacionados tr WHERE tr.tramite_id = tramites.id)"
+        if args.solo_sin_relaciones
+        else ""
+    )
     chat = factory.chat_potente()
     with get_connection() as conn:
         bases = conn.execute(
             "SELECT id, nombre, descripcion FROM tramites "
-            "WHERE activo AND embedding IS NOT NULL AND id >= %s ORDER BY id",
-            (args.desde,),
+            "WHERE activo AND embedding IS NOT NULL AND id BETWEEN %s AND %s" + filtro_extra + " ORDER BY id",
+            (args.desde, hasta),
         ).fetchall()
     bases = [{"id": f[0], "nombre": f[1], "descripcion": f[2]} for f in bases]
     if args.muestra:

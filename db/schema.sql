@@ -98,3 +98,33 @@ CREATE TABLE IF NOT EXISTS tramites_relacionados (
   tipo_relacion text NOT NULL CHECK (tipo_relacion IN ('siguiente_paso', 'requisito_previo', 'alternativa', 'mismo_evento')),
   PRIMARY KEY (tramite_id, related_tramite_id)
 );
+
+-- Dominio MVP: impuestos, empresas y trámites municipales (catastro incluido).
+-- Única fuente de verdad del alcance del asistente. Las columnas por_* explican
+-- por qué cada trámite pertenece (auditable con un SELECT). Vista simple sobre
+-- tramites: queda correcta sola tras cada sync semanal, sin ganchos en ingest.
+-- Nota: sin filtro por activo — vigencia y pertenencia son ejes independientes
+-- (el retrieval ya filtra t.activo); la auditoría debe ver también inactivos.
+CREATE OR REPLACE VIEW dominio_mvp AS
+WITH marcas AS (
+  SELECT t.id AS tramite_id,
+    EXISTS (
+      SELECT 1 FROM tramites_categorias tc
+      JOIN categorias c ON c.id = tc.categoria_id
+      WHERE tc.tramite_id = t.id AND c.slug IN ('impuestos', 'empresas')
+    ) AS por_categoria,
+    EXISTS (
+      -- por patrón y no por ids/slugs fijos: los ids son serial por instancia,
+      -- y una lista de slugs queda obsoleta en silencio cuando el sync trae un
+      -- GAM nuevo. Hoy matchea exactamente las 9 entidades municipales/RUAT.
+      SELECT 1 FROM entidades e
+      WHERE e.id = t.entidad_id AND e.nombre ILIKE '%municipal%'
+    ) AS por_entidad,
+    (t.nombre ILIKE '%catastr%'
+     OR t.descripcion ILIKE '%catastr%'
+     OR array_to_string(t.sinonimos, ' ') ILIKE '%catastr%') AS por_keyword
+  FROM tramites t
+)
+SELECT tramite_id, por_categoria, por_entidad, por_keyword
+FROM marcas
+WHERE por_categoria OR por_entidad OR por_keyword;

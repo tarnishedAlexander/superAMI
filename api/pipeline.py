@@ -20,7 +20,9 @@ from providers.base import ChatProvider, EmbeddingProvider
 logger = logging.getLogger(__name__)
 
 MENSAJE_NO_ENCONTRADO = (
-    "No encontré un trámite que coincida con tu consulta. ¿Podés reformularla con otras palabras?"
+    "No encontré un trámite que coincida con tu consulta. Por ahora cubro impuestos, "
+    "empresas y trámites municipales (catastro incluido). Si tu consulta es de esos temas, "
+    "¿podés reformularla con otras palabras?"
 )
 MENSAJE_ERROR = "Hubo un problema procesando tu consulta. Intentá de nuevo en un momento."
 
@@ -111,7 +113,9 @@ def procesar_mensaje(deps: Deps, conversation_id: str, mensaje: str) -> Iterator
         with get_connection() as conn:
             hits = buscar_tramites(conn, embedding, **filtros)
             if not hits and filtros:
-                # fail-open: los filtros pueden haber sido mal inferidos
+                # fail-open: los filtros pueden haber sido mal inferidos. El re-run
+                # sigue acotado al dominio MVP (vive en el SQL de buscar_tramites):
+                # el fail-open deshace filtros inferidos, no la frontera del producto.
                 hits = buscar_tramites(conn, embedding)
 
         veredicto = evaluar_confianza([h["distancia"] for h in hits])

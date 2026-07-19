@@ -99,6 +99,25 @@ def listar_categorias(conn) -> list[dict]:
     return [{"slug": f[0], "nombre": f[1]} for f in filas]
 
 
+def listar_categorias_dominio(conn) -> list[dict]:
+    """Categorías con al menos un trámite en el dominio MVP (enum del filtro de retrieval).
+
+    No se encoge a las categorías del predicado: las entidades municipales emiten
+    trámites de casi todas las categorías (vivienda, transporte...), y una categoría
+    inferible que garantice ≥1 hit in-domain evita re-runs fail-open inútiles.
+    """
+    filas = conn.execute(
+        """
+        SELECT DISTINCT c.slug, c.nombre
+        FROM categorias c
+        JOIN tramites_categorias tc ON tc.categoria_id = c.id
+        JOIN dominio_mvp d ON d.tramite_id = tc.tramite_id
+        ORDER BY c.nombre
+        """
+    ).fetchall()
+    return [{"slug": f[0], "nombre": f[1]} for f in filas]
+
+
 def listar_eventos(conn) -> list[str]:
     return [f[0] for f in conn.execute("SELECT nombre FROM eventos_de_vida ORDER BY nombre").fetchall()]
 
@@ -127,6 +146,7 @@ FROM tramites t
 LEFT JOIN entidades e ON e.id = t.entidad_id
 WHERE t.embedding IS NOT NULL
   AND t.activo
+  AND EXISTS (SELECT 1 FROM dominio_mvp d WHERE d.tramite_id = t.id)
   AND (%(cat)s::text IS NULL OR EXISTS (
         SELECT 1 FROM tramites_categorias tc JOIN categorias c ON c.id = tc.categoria_id
         WHERE tc.tramite_id = t.id AND c.slug = %(cat)s))
@@ -221,7 +241,11 @@ def guardar_fetch_cache(conn, url: str, datos: dict) -> None:
 
 
 def candidatos_relacionados(conn, tramite_id: int, limit: int = 5) -> list[dict]:
-    """Candidatos baratos: misma entidad o evento de vida compartido, por cercanía de embedding."""
+    """Candidatos baratos: misma entidad o evento de vida compartido, por cercanía de embedding.
+
+    Sin acotar por dominio_mvp a propósito: el grafo de relaciones cruza la frontera
+    del dominio (prerequisitos nacionales de trámites municipales) y no es retrieval.
+    """
     filas = conn.execute(
         """
         SELECT t.id, t.nombre, t.descripcion, e.nombre AS entidad_nombre,
@@ -261,6 +285,8 @@ def guardar_relaciones(conn, tramite_id: int, relaciones: list[dict]) -> None:
 
 
 def listar_relacionados(conn, tramite_id: int, limit: int = 3) -> list[dict]:
+    # sin acotar por dominio_mvp a propósito: un trámite municipal puede tener como
+    # requisito previo uno nacional (CI del SEGIP, NIT) y narrarlo es deseable
     filas = conn.execute(
         """
         SELECT tr.tipo_relacion, t.nombre, e.nombre

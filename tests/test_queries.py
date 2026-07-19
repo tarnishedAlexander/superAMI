@@ -15,7 +15,9 @@ DIM = 1024
 
 def _fila(id_, nombre, **overrides):
     fila = {
-        "id": id_, "nombre": nombre, "slug": f"slug-{id_}", "sinonimos": ["prueba"],
+        # "catastro" mete la fila al dominio MVP por keyword: buscar_tramites solo
+        # devuelve trámites in-domain (ver vista dominio_mvp en db/schema.sql)
+        "id": id_, "nombre": nombre, "slug": f"slug-{id_}", "sinonimos": ["prueba", "catastro"],
         "descripcion": "desc", "resultado": "res", "marco_legal": None,
         "canal": "virtual", "digitalizado": True,
         "requisitos": [{"nombre": "CI", "comentario": None}], "documentos": [],
@@ -140,6 +142,26 @@ def test_fetch_cache_roundtrip_y_ttl(conn):
     assert leer_fetch_cache(conn, "https://test.gob.bo/t", ttl_dias=7) is None
     conn.execute("DELETE FROM fetch_cache WHERE url = 'https://test.gob.bo/t'")
     conn.commit()
+
+
+def test_dominio_mvp_excluye_fuera_de_alcance(conn):
+    guardar_tramite_completo(conn, _fila(900020, "FUERA DE DOMINIO", sinonimos=["prueba"]), _vec(1.0))
+    conn.commit()
+
+    # está en la tabla pero no en el dominio (categoría cat-test, entidad no municipal,
+    # sin keyword catastr) => el retrieval no lo devuelve
+    assert conn.execute("SELECT 1 FROM tramites WHERE id = 900020").fetchone() is not None
+    hits = [h for h in buscar_tramites(conn, _vec(1.0), limit=5000) if h["id"] == 900020]
+    assert hits == []
+    assert conn.execute("SELECT 1 FROM dominio_mvp WHERE tramite_id = 900020").fetchone() is None
+
+    # las marcas por_* explican la pertenencia: la fila default entra solo por keyword
+    guardar_tramite_completo(conn, _fila(900021, "EN DOMINIO POR KEYWORD"), _vec(1.0))
+    conn.commit()
+    marcas = conn.execute(
+        "SELECT por_categoria, por_entidad, por_keyword FROM dominio_mvp WHERE tramite_id = 900021"
+    ).fetchone()
+    assert marcas == (False, False, True)
 
 
 def test_candidatos_y_relaciones(conn):

@@ -317,3 +317,44 @@ y decidido deliberadamente no enmascarar, para que la sesión con
 usuarios reales (Task 18, guía ya creada) tenga el diagnóstico correcto
 para decidir los próximos pasos (recalibración, deduplicación de
 trámites casi-idénticos, o mejora del texto embebido).
+
+## Alcance de dominio MVP: vista `dominio_mvp` (2026-07-18)
+
+El equipo acotó el MVP a impuestos, catastro y actividades económicas.
+Hallazgo contra datos reales: el dataset NO tiene categoría "catastro"
+ni "actividades económicas" — solo `impuestos` (110 trámites) y
+`empresas` (305) sirven como proxies; catastro existe únicamente como
+keyword en 21 trámites, y hay 9 entidades municipales (GAMs, RUAT,
+Empresa Municipal de Residuos). Decisión (usuario): predicado híbrido
+en una vista SQL (`dominio_mvp`, final de `db/schema.sql`) —
+categoría IN (impuestos, empresas) OR entidad `ILIKE '%municipal%'`
+OR keyword `catastr%` en nombre/descripcion/sinonimos. 511 de 1,739
+trámites. Columnas `por_*` para auditoría; vista simple que queda
+correcta sola tras cada sync.
+
+Cableado: filtro always-on en `_SQL_BUSCAR` (límite de producto, no
+parámetro por consulta; el fail-open del pipeline lo hereda y se queda
+in-domain). El enum de categorías inferibles pasa a
+`listar_categorias_dominio` (16/17 categorías tienen presencia
+in-domain vía entidades municipales — encogerlo a 2 habría roto
+consultas catastrales de vivienda). `candidatos_relacionados` y
+`listar_relacionados` quedan sin acotar a propósito (prerequisitos
+nacionales: CI, NIT). Mensajes de alcance en `MENSAJE_NO_ENCONTRADO`,
+`SISTEMA_SINTESIS` y `SISTEMA_SINTESIS_VIVO`.
+
+Hallazgo de calibración post-recorte: "¿Cómo renuevo mi pasaporte?"
+gatea "claro" (d=0.415) sobre un trámite municipal equivocado. El
+barrido (`tests/calibrar_gate.py`) sobre el corpus recortado no tiene
+ningún punto con `claro_incorrecto=0` (mínimo 13-17): coherente con el
+hallazgo de la verificación del MVP — y ahora además el eval_dataset
+quedó mayormente out-of-domain, así que recalibrar contra él sería
+optimizar ruido. Decisión: NO tocar umbrales; mitigación por prompt
+(regla de "tema distinto → declarar alcance" en `SISTEMA_SINTESIS`).
+Pendiente: etiquetar `tests/eval_dataset.py` con un flag `dominio` y
+reportar métricas por separado.
+
+Operativo: aplicar `db/schema.sql` completo con la corrida batch de
+relacionados activa se cuelga — el `ALTER TABLE ... IF NOT EXISTS`
+(no-op) espera ACCESS EXCLUSIVE detrás de workers idle-in-transaction
+y encolona a los demás. Con el batch corriendo, aplicar solo la vista
+(`sed -n '/Dominio MVP/,$p' db/schema.sql | psql ...`).
