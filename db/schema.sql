@@ -128,3 +128,14 @@ WITH marcas AS (
 SELECT tramite_id, por_categoria, por_entidad, por_keyword
 FROM marcas
 WHERE por_categoria OR por_entidad OR por_keyword;
+
+-- Multi-fuente: distinguir el origen de cada trámite (tramites-bo/gob.bo vs lapaz.bo).
+-- gob.bo trae ids provistos por la fuente (1002–3537); La Paz se scrapea y no tiene
+-- id nativo, así que se le asignan ids desde 1,000,000 (estables por slug, idempotente).
+ALTER TABLE tramites ADD COLUMN IF NOT EXISTS fuente text NOT NULL DEFAULT 'gob_bo';
+
+CREATE SEQUENCE IF NOT EXISTS lapaz_id_seq START 1000000;
+CREATE TABLE IF NOT EXISTS lapaz_slug_ids (
+  slug text PRIMARY KEY,
+  tramite_id integer NOT NULL DEFAULT nextval('lapaz_id_seq')
+);

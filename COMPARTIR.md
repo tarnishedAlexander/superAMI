@@ -4,9 +4,9 @@ Guía para poner a correr AMI **sin reprocesar nada**: los embeddings y el grafo
 de relaciones entre trámites ya están calculados y viajan dentro de un dump de
 la base de datos. Tus compañeros solo importan el dump y levantan el API.
 
-> El procesamiento pesado (embeddings de 1,739 trámites + clasificación de
-> ~4,000 relaciones procedimentales) ya está hecho. En una máquina limpio tomó
-> **días**; con el dump toma **~2 minutos**.
+> El procesamiento pesado (embeddings de **1,814** trámites — 1,739 de gob.bo +
+> 75 del GAMLP La Paz — + clasificación de **~4,300** relaciones procedimentales)
+> ya está hecho. En una máquina limpia tomó **días**; con el dump toma **~2 min**.
 
 ---
 
@@ -35,6 +35,35 @@ que explican *por qué* pertenece — es auditable con un `SELECT`.
 
 ---
 
+## 1.1. Segunda fuente: trámites del GAMLP (lapaz.bo)
+
+Se sumó una **segunda fuente** sin reemplazar la actual: los trámites del
+**Gobierno Autónomo Municipal de La Paz** scrapeados de su sitio oficial
+`lapaz.bo`. Conviven con los de gob.bo en la **misma tabla `tramites`**,
+distinguidos por la columna **`fuente`** (`gob_bo` / `lapaz_gamlp`).
+
+- **75 trámites del GAMLP** cargados (impuestos municipales, catastro, licencias
+  de funcionamiento, vehículos, puestos de venta, obras, etc.), con ficha más
+  rica que gob.bo (requisitos detallados, "dónde se inicia", pasos, costo).
+- Entran **automáticamente al dominio MVP**: su entidad es "Gobierno Autónomo
+  Municipal de La Paz (GAMLP)" y la vista `dominio_mvp` ya incluye lo municipal
+  (`entidad ILIKE '%municipal%'`) — sin tocar la vista.
+- IDs desde **1,000,000** (secuencia `lapaz_id_seq`) para no chocar con los de
+  gob.bo (1002–3537); mapeo estable slug→id en `lapaz_slug_ids` (resumible).
+- El grafo `tramites_relacionados` los conecta entre sí (238 relaciones nuevas).
+- Se mantienen **duplicados a propósito** (ej. licencia de funcionamiento existe
+  en ambas fuentes) marcados por `fuente` — no se deduplica.
+
+Spec completa del scraper/mapper en `docs/PLAN-integracion-lapaz.md`. Archivos
+nuevos: `ingest/lapaz_scrape.py`, `ingest/lapaz_mapper.py`.
+
+> Nota: la corrida masiva quedó en 75 trámites por una caída del endpoint de
+> **embeddings** de NIM (500s) a mitad de proceso; hay ~69 más recuperables
+> re-corriendo el scraper cuando el endpoint vuelva (es idempotente/resumible):
+> `SALTAR_GUIDED_JSON=1 MODELO_POTENTE=nvidia/nemotron-3-super-120b-a12b .venv/bin/python -m ingest.lapaz_scrape`
+
+---
+
 ## 2. Cambios técnicos (qué archivos se tocaron)
 
 Refinamiento #1 del scope + el relleno del grafo de relaciones + parches de
@@ -55,8 +84,13 @@ resiliencia. Todo está en el diff actual de la rama `main` (sin commitear aún)
 - **`ingest/relacionados.py`** — flags `--hasta` (rangos paralelos),
   `--solo-sin-relaciones` (backfill) y `PAUSA_SEGUNDOS` por env.
 - **`providers/openai_compat.py`** — cliente OpenAI con `timeout=60`,
-  `max_retries=3`, y gate `SALTAR_GUIDED_JSON=1` (para modelos que ignoran el
-  guided decoding y duplican llamadas).
+  `max_retries=3`, gate `SALTAR_GUIDED_JSON=1`, y `_extraer_json` endurecido
+  (tolera modelos que razonan: quita `<think>`, ignora prosa, toma el objeto
+  JSON más rico).
+- **`db/schema.sql` / `db/queries.py` / `ingest/mapper.py`** — columna `fuente`,
+  secuencia `lapaz_id_seq` + tabla `lapaz_slug_ids` (ver §1.1).
+- **`ingest/lapaz_scrape.py` / `ingest/lapaz_mapper.py`** — scraper + extractor
+  del GAMLP (nuevos).
 - **`scripts/export_db.sh` / `scripts/import_db.sh`** — exportar/importar el dump.
 
 Los 82 tests pasan. Detalle de decisiones en `DECISIONS.md`.
@@ -73,17 +107,16 @@ necesités…", algo que la sola similitud de embeddings no captura.
 
 Estado final (dentro del dump):
 
-| | |
-|---|---|
-| Trámites activos con embedding | **1,739** |
-| Relaciones totales | **4,089** |
-| Trámites con ≥1 relación | **1,567** (90 %) |
-| Trámites sin relación (ceros legítimos) | 172 |
+| | gob.bo | + GAMLP La Paz | total |
+|---|---|---|---|
+| Trámites activos con embedding | 1,739 | 75 | **1,814** |
+| Relaciones | 4,089 | 238 | **4,327** |
+| Trámites con ≥1 relación | 1,567 | 72 | **1,639** |
 
-Distribución por tipo: `alternativa` 2,177 · `mismo_evento` 862 ·
-`siguiente_paso` 572 · `requisito_previo` 478.
+Distribución por tipo (total): `alternativa` 2,371 · `mismo_evento` 869 ·
+`siguiente_paso` 589 · `requisito_previo` 498.
 
-**Todo esto está dentro de `ami-20260719.dump`** — no hay que volver a
+**Todo esto está dentro de `ami-20260719-lapaz.dump`** — no hay que volver a
 calcularlo. Los embeddings viven en `tramites.embedding` (pgvector) y el grafo
 en `tramites_relacionados`.
 
@@ -112,8 +145,8 @@ docker compose up -d
 #    al levantar por primera vez crea el esquema (incluida la vista dominio_mvp)
 
 # 5. Importar los datos YA procesados  ← esto reemplaza a `ingest.load`
-scripts/import_db.sh ami-20260719.dump
-#    imprime la verificación: 1739 trámites | 1739 con embedding | 4089 relacionados
+scripts/import_db.sh ami-20260719-lapaz.dump
+#    imprime la verificación: 1814 trámites | 1814 con embedding | 4327 relacionados
 
 # 6. Correr el API
 .venv/bin/uvicorn api.main:app --port 8000
@@ -128,6 +161,10 @@ scripts/import_db.sh ami-20260719.dump
 ```bash
 curl -N -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"mensaje": "¿qué es el catastro?"}'
+
+# trámite del GAMLP La Paz (2ª fuente):
+curl -N -X POST localhost:8000/chat -H 'content-type: application/json' \
+  -d '{"mensaje": "licencia de funcionamiento en La Paz"}'
 ```
 
 Respuesta en stream SSE (eventos `answer` con deltas y un `{"done": true,
@@ -149,7 +186,7 @@ Dos cosas, y con eso corren sin reprocesar:
    **deben coincidir**: la vista `dominio_mvp` y `listar_categorias_dominio`
    son parte del código, sin ellas el API no arranca contra estos datos.
 
-2. **El dump** — `ami-20260719.dump` (9.4 MB). Opciones:
+2. **El dump** — `ami-20260719-lapaz.dump` (9.8 MB). Opciones:
    - Commitearlo al repo (cabe, GitHub aguanta <100 MB) y viaja con el `git pull`.
    - O mandarlo aparte (Drive / WeTransfer) y que lo dejen en la raíz de `superAMI/`.
 

@@ -6,7 +6,7 @@ _COLUMNAS_TRAMITE = [
     "id", "nombre", "slug", "sinonimos", "descripcion", "resultado", "marco_legal",
     "entidad_id", "costo_monto", "costo_moneda", "costo_concepto", "costo_es_gratuito",
     "requisitos", "documentos", "ubicaciones", "modalidades", "enlaces",
-    "canal", "digitalizado", "embedding", "last_updated",
+    "canal", "digitalizado", "embedding", "last_updated", "fuente",
 ]
 
 
@@ -66,6 +66,9 @@ def guardar_tramite_completo(conn, fila: dict, embedding: list[float] | None) ->
         "modalidades": Json(fila["modalidades"]),
         "enlaces": Json(fila["enlaces"]),
     }
+    # fuente es NOT NULL con DEFAULT 'gob_bo'; al listarla explícita en el INSERT
+    # el DEFAULT no aplica, así que coalescemos aquí si el mapper no la fijó
+    params["fuente"] = params.get("fuente") or "gob_bo"
     columnas = ", ".join(_COLUMNAS_TRAMITE)
     placeholders = ", ".join(
         f"%({c})s::vector" if c == "embedding" else f"%({c})s" for c in _COLUMNAS_TRAMITE

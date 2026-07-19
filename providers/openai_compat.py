@@ -10,17 +10,60 @@ from openai import APIError, OpenAI
 logger = logging.getLogger(__name__)
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _objetos_balanceados(texto: str):
+    """Yield de subcadenas {...} con llaves balanceadas (ignora las de strings)."""
+    profundidad = inicio = 0
+    en_cadena = escapado = False
+    for i, ch in enumerate(texto):
+        if en_cadena:
+            if escapado:
+                escapado = False
+            elif ch == "\\":
+                escapado = True
+            elif ch == '"':
+                en_cadena = False
+            continue
+        if ch == '"':
+            en_cadena = True
+        elif ch == "{":
+            if profundidad == 0:
+                inicio = i
+            profundidad += 1
+        elif ch == "}" and profundidad > 0:
+            profundidad -= 1
+            if profundidad == 0:
+                yield texto[inicio : i + 1]
 
 
 def _extraer_json(texto: str) -> dict | None:
-    match = _JSON_RE.search(texto or "")
-    if not match:
+    """Extrae un objeto JSON tolerando modelos que razonan (nemotron/deepseek):
+    quita trazas <think>, ignora prosa alrededor y, si hay varios objetos, se
+    queda con el más rico (el que más claves tiene = la ficha, no un {} suelto)."""
+    if not texto:
         return None
-    try:
-        datos = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    return datos if isinstance(datos, dict) else None
+    texto = _THINK_RE.sub("", texto).replace("<think>", "").replace("</think>", "")
+    # camino rápido: primer '{' a último '}' (cubre el caso de salida JSON limpia)
+    match = _JSON_RE.search(texto)
+    if match:
+        try:
+            datos = json.loads(match.group(0))
+            if isinstance(datos, dict):
+                return datos
+        except json.JSONDecodeError:
+            pass
+    # fallback robusto: escanear objetos balanceados y quedarse con el más rico
+    mejor: dict | None = None
+    for frag in _objetos_balanceados(texto):
+        try:
+            datos = json.loads(frag)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(datos, dict) and (mejor is None or len(datos) > len(mejor)):
+            mejor = datos
+    return mejor
 
 
 class OpenAICompatChatProvider:

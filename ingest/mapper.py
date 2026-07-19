@@ -112,6 +112,7 @@ def mapear_tramite(record: dict) -> dict:
         },
         "categorias": [{"slug": c["slug"], "nombre": c["nombre"]} for c in record.get("categorias") or []],
         "eventos": record.get("eventosVida") or [],
+        "fuente": "gob_bo",
         **mapear_costo(record),
     }
 
