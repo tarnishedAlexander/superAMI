@@ -82,57 +82,87 @@ class OpenAICompatChatProvider:
         return [{"role": "system", "content": system}, *messages]
 
     def complete(self, *, system: str, messages: list[dict], max_tokens: int = 1024) -> str:
-        respuesta = self._client.chat.completions.create(
-            model=self.model, messages=self._mensajes(system, messages), max_tokens=max_tokens
-        )
-        return respuesta.choices[0].message.content or ""
+        for intento in range(3):
+            try:
+                respuesta = self._client.chat.completions.create(
+                    model=self.model, messages=self._mensajes(system, messages), max_tokens=max_tokens
+                )
+                return respuesta.choices[0].message.content or ""
+            except Exception as error:
+                if intento == 2:
+                    raise
+                espera = 5 * (intento + 1)
+                logger.warning("complete falló (%s), reintento en %ss", error, espera)
+                time.sleep(espera)
 
     def complete_json(self, *, system: str, messages: list[dict], schema: dict, max_tokens: int = 1024) -> dict | None:
         """Fail-open: nunca lanza; devuelve None ante cualquier problema."""
-        try:
-            datos = None
-            # SALTAR_GUIDED_JSON=1: para modelos que ignoran nvext.guided_json
-            # (p.ej. deepseek-v4-flash) el primer intento siempre falla y duplica
-            # el costo de cada llamada — ir directo al fallback de prompt
-            if os.environ.get("SALTAR_GUIDED_JSON") != "1":
-                try:
-                    # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
+        for intento in range(3):
+            try:
+                datos = None
+                # SALTAR_GUIDED_JSON=1: para modelos que ignoran nvext.guided_json
+                # (p.ej. deepseek-v4-flash) el primer intento siempre falla y duplica
+                # el costo de cada llamada — ir directo al fallback de prompt
+                if os.environ.get("SALTAR_GUIDED_JSON") != "1":
+                    try:
+                        # guided decoding de NVIDIA NIM (vLLM); no todos los modelos lo soportan
+                        respuesta = self._client.chat.completions.create(
+                            model=self.model,
+                            messages=self._mensajes(system, messages),
+                            max_tokens=max_tokens,
+                            extra_body={"nvext": {"guided_json": schema}},
+                        )
+                        datos = _extraer_json(respuesta.choices[0].message.content or "")
+                    except Exception:
+                        pass
+                if datos is None:
+                    # algunos endpoints ignoran guided_json sin error y devuelven prosa
                     respuesta = self._client.chat.completions.create(
                         model=self.model,
-                        messages=self._mensajes(system, messages),
+                        messages=self._mensajes(
+                            system + "\nRespondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional.",
+                            messages,
+                        ),
                         max_tokens=max_tokens,
-                        extra_body={"nvext": {"guided_json": schema}},
                     )
                     datos = _extraer_json(respuesta.choices[0].message.content or "")
-                except Exception:
-                    pass
-            if datos is None:
-                # algunos endpoints ignoran guided_json sin error y devuelven prosa
-                respuesta = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=self._mensajes(
-                        system + "\nRespondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional.",
-                        messages,
-                    ),
-                    max_tokens=max_tokens,
-                )
-                datos = _extraer_json(respuesta.choices[0].message.content or "")
-            return datos
-        except Exception:
-            logger.warning("complete_json falló para %s", self.model, exc_info=True)
-            return None
+                return datos
+            except Exception as error:
+                if intento == 2:
+                    logger.warning("complete_json falló para %s", self.model, exc_info=True)
+                    return None
+                espera = 5 * (intento + 1)
+                logger.warning("complete_json falló (%s), reintento en %ss", error, espera)
+                time.sleep(espera)
 
     def stream(self, *, system: str, messages: list[dict], max_tokens: int = 4096) -> Iterator[str]:
-        chunks = self._client.chat.completions.create(
-            model=self.model,
-            messages=self._mensajes(system, messages),
-            max_tokens=max_tokens,
-            stream=True,
-        )
+        for intento in range(3):
+            try:
+                chunks = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=self._mensajes(system, messages),
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                break
+            except Exception as error:
+                if intento == 2:
+                    raise
+                espera = 5 * (intento + 1)
+                logger.warning("chat stream falló (%s), reintento en %ss", error, espera)
+                time.sleep(espera)
+
+        last_chunk = ""
         for chunk in chunks:
             delta = chunk.choices[0].delta.content if chunk.choices else None
             if delta:
-                yield delta
+                if last_chunk and delta.startswith(last_chunk) and len(delta) > len(last_chunk):
+                    nuevo = delta[len(last_chunk):]
+                    last_chunk = delta
+                    yield nuevo
+                else:
+                    last_chunk = delta
+                    yield delta
 
 
 class OpenAICompatEmbeddingProvider:
@@ -171,4 +201,13 @@ class OpenAICompatEmbeddingProvider:
         return vectores
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed([text], "query")[0]
+        for intento in range(3):
+            try:
+                return self._embed([text], "query")[0]
+            except Exception as error:
+                if intento == 2:
+                    raise
+                espera = 5 * (intento + 1)
+                logger.warning("embed_query falló (%s), reintento en %ss", error, espera)
+                time.sleep(espera)
+
