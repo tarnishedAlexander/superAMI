@@ -32,11 +32,24 @@ def _ollama_chat(modelo: str) -> OpenAICompatChatProvider:
     )
 
 
+_GEMINI_BASE_URL_DEFAULT = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def _gemini_chat(modelo: str) -> OpenAICompatChatProvider:
+    return OpenAICompatChatProvider(
+        model=modelo,
+        base_url=os.environ.get("GEMINI_BASE_URL", _GEMINI_BASE_URL_DEFAULT),
+        api_key=os.environ.get("GEMINI_API_KEY", ""),
+    )
+
+
 def chat_potente() -> ChatProvider:
     if _proveedor() == "anthropic":
         return AnthropicChatProvider(os.environ.get("MODELO_POTENTE", "claude-sonnet-5"))
     if _proveedor() == "ollama":
         return _ollama_chat(os.environ.get("MODELO_POTENTE", "llama3.1:8b"))
+    if _proveedor() == "gemini":
+        return _gemini_chat(os.environ.get("MODELO_POTENTE", "gemini-3.5-flash"))
     return _nvidia_chat(os.environ.get("MODELO_POTENTE", "meta/llama-3.3-70b-instruct"))
 
 
@@ -45,6 +58,8 @@ def chat_economico() -> ChatProvider:
         return AnthropicChatProvider(os.environ.get("MODELO_ECONOMICO", "claude-haiku-4-5"))
     if _proveedor() == "ollama":
         return _ollama_chat(os.environ.get("MODELO_ECONOMICO", "llama3.1:8b"))
+    if _proveedor() == "gemini":
+        return _gemini_chat(os.environ.get("MODELO_ECONOMICO", "gemini-3.5-flash"))
     return _nvidia_chat(os.environ.get("MODELO_ECONOMICO", "meta/llama-3.1-8b-instruct"))
 
 
@@ -59,6 +74,13 @@ def embedder() -> EmbeddingProvider:
 
         return SentenceTransformersEmbeddingProvider(
             os.environ.get("MODELO_EMBEDDINGS", "intfloat/multilingual-e5-base")
+        )
+    if _proveedor() == "gemini":
+        return OpenAICompatEmbeddingProvider(
+            model=os.environ.get("MODELO_EMBEDDINGS", "gemini-embedding-001"),
+            base_url=os.environ.get("GEMINI_BASE_URL", _GEMINI_BASE_URL_DEFAULT),
+            api_key=os.environ.get("GEMINI_API_KEY", ""),
+            dimensions=int(os.environ.get("EMBEDDING_DIM", "1024")) if os.environ.get("EMBEDDING_DIM") else None,
         )
     return OpenAICompatEmbeddingProvider(
         model=os.environ.get("MODELO_EMBEDDINGS", "baai/bge-m3"),

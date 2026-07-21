@@ -7,8 +7,8 @@ from typing import Literal
 # 0.52 (la consulta sin match más lejana, d1 0.641, queda gateada). Los gaps chicos
 # (<0.03) suelen ser variantes legítimas del mismo trámite (original vs. duplicado)
 # donde preguntar es mejor UX que adivinar.
-UMBRAL_GAP = 0.03
-UMBRAL_DISTANCIA_MAX = 0.52
+UMBRAL_GAP = 0.005
+UMBRAL_DISTANCIA_MAX = 0.4
 
 
 def evaluar_confianza(
