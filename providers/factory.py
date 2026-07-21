@@ -64,4 +64,5 @@ def embedder() -> EmbeddingProvider:
         model=os.environ.get("MODELO_EMBEDDINGS", "baai/bge-m3"),
         base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_BASE_URL_DEFAULT),
         api_key=os.environ.get("NVIDIA_API_KEY", ""),
+        dimensions=int(os.environ.get("EMBEDDING_DIM", "1024")) if os.environ.get("EMBEDDING_DIM") else None,
     )

@@ -170,19 +170,31 @@ class OpenAICompatEmbeddingProvider:
 
     _TAMANO_LOTE = 32
 
-    def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None):
+    def __init__(self, model: str, base_url: str, api_key: str, client: OpenAI | None = None, dimensions: int | None = None):
         self.model = model
+        self.dimensions = dimensions
         # timeout explícito: sin él, un request colgado del free tier de NIM
         # bloquea hasta 600s por intento (corridas batch de horas se vuelven días)
         self._client = client or OpenAI(base_url=base_url, api_key=api_key, timeout=60.0, max_retries=3)
 
     def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
+        extra = {}
+        base_url_str = str(getattr(self._client, "base_url", ""))
+        if "api.openai.com" in base_url_str:
+            if self.dimensions:
+                extra["dimensions"] = self.dimensions
+        else:
+            extra["extra_body"] = {"input_type": input_type, "truncate": "END"}
+
+
+
         respuesta = self._client.embeddings.create(
             model=self.model,
             input=texts,
-            extra_body={"input_type": input_type, "truncate": "END"},
+            **extra
         )
         return [d.embedding for d in respuesta.data]
+
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         vectores: list[list[float]] = []
