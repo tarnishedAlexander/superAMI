@@ -6,40 +6,15 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.conversations_pg import PostgresConversationStore
+from api import whatsapp
+from api.deps import get_deps
 from api.pipeline import Deps, procesar_mensaje
-from db.connection import get_connection
-from db.queries import listar_categorias_dominio, listar_eventos
-from providers import factory
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="AMI — Asistente de Trámites Bolivia")
-
-_deps: Deps | None = None
-
-
-def get_deps() -> Deps:
-    global _deps
-    if _deps is None:
-        with get_connection() as conn:
-            catalogos = {
-                # solo categorías con trámites en el dominio MVP: ninguna categoría
-                # inferible puede producir 0 hits por construcción
-                "categorias": [c["slug"] for c in listar_categorias_dominio(conn)],
-                "eventos": listar_eventos(conn),
-            }
-        store = PostgresConversationStore()
-        store.limpiar_viejas(horas=24)
-        _deps = Deps(
-            chat_economico=factory.chat_economico(),
-            chat_potente=factory.chat_potente(),
-            embedder=factory.embedder(),
-            store=store,
-            catalogos=catalogos,
-        )
-    return _deps
+app.include_router(whatsapp.router)
 
 
 class ChatRequest(BaseModel):
