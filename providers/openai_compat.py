@@ -180,11 +180,12 @@ class OpenAICompatEmbeddingProvider:
     def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
         extra = {}
         base_url_str = str(getattr(self._client, "base_url", ""))
-        if "api.openai.com" in base_url_str or "googleapis.com" in base_url_str:
+        if "api.openai.com" in base_url_str or "googleapis.com" in base_url_str or "azure.com" in base_url_str:
             if self.dimensions:
                 extra["dimensions"] = self.dimensions
         else:
             extra["extra_body"] = {"input_type": input_type, "truncate": "END"}
+
 
 
 
